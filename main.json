@@ -149,6 +149,20 @@
       "metadata": {
         "description": "Storage account SKU for Azure Files"
       }
+    },
+    "invitationOrgName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Organization name shown in invitation emails (INVITATION_ORG_NAME)"
+      }
+    },
+    "signupsDomainsWhitelist": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Comma-separated email domain whitelist for signups (SIGNUPS_DOMAINS_WHITELIST)"
+      }
     }
   },
   "variables": {
@@ -479,6 +493,14 @@
                 {
                   "name": "SMTP_PASSWORD",
                   "secretRef": "smtp-password"
+                },
+                {
+                  "name": "INVITATION_ORG_NAME",
+                  "value": "[parameters('invitationOrgName')]"
+                },
+                {
+                  "name": "SIGNUPS_DOMAINS_WHITELIST",
+                  "value": "[parameters('signupsDomainsWhitelist')]"
                 }
               ],
               "volumeMounts": [
