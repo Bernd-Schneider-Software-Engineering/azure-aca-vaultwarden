@@ -31,7 +31,7 @@
     },
     "vaultwardenImage": {
       "type": "string",
-      "defaultValue": "vaultwarden/server:1.33.2",
+      "defaultValue": "vaultwarden/server:1.34.3",
       "metadata": {
         "description": "Container image to use for Vaultwarden (pin a version for reproducible deployments)"
       }
