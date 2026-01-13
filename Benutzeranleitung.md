@@ -1,5 +1,4 @@
 🔐 Vaultwarden – Benutzeranleitung
-
 (für Menschen, die noch NIE einen Passwort‑Manager benutzt haben)
 
 🧠 Worum geht’s hier überhaupt?
@@ -25,6 +24,9 @@ Wenn du es vergisst → alle Passwörter sind weg.
 Beispiel:MeinHundMag2026KeineUSBSticks!
 
 ❌ Kein Name + Geburtsdatum❌ Kein Firmenname❌ Kein Zettel am Monitor
+
+<img width="1702" height="1273" alt="image" src="https://github.com/user-attachments/assets/6e8c4726-2920-4074-aa7c-3d34ceb5eabe" />
+
 
 🚀 TEIL 1 – In 5 Minuten startklar
 
