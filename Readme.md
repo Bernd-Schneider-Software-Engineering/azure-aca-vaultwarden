@@ -107,7 +107,24 @@ Click **Deploy**.
 3. **Disable HTTP**
    - Set parameter `allowInsecureHttp = false`
    - Enforces HTTPS-only access
+     
+4. **Microsoft Edge Konfiguration: Enhanced Security Mode (Bypass-Liste)**
+    Um einen reibungslosen Zugriff auf interne Ressourcen zu gewährleisten und gleichzeitig die Browsersicherheit zu maximieren, wurde im Microsoft Intune Admin Center eine spezifische Richtlinie für Windows-Geräte konfiguriert. 
 
+   Konfigurationsdetails:
+   Richtlinien-Name: W10 - Brwwoser - s
+   Plattform: Windows
+   Zuweisung: Alle Firmengeräte (Eingeschlossene Gruppen: All devices, All users)
+
+   Wichtige Einstellung:
+   In den Configuration settings unter der Kategorie Microsoft Edge ist folgende Option aktiviert:
+
+   Einstellung: Configure the list of domains for which enhance security mode will not be enforced (Konfiguriere die Liste der Domänen, für die der erweiterte Sicherheitsmodus nicht erzwungen wird).
+   Status: Aktiviert (Enabled)
+   
+   Ausgenommene Domäne: vault.firma.tld
+   
+   Hinweis: Diese Einstellung MUSS gesetzt sein, da der Browser ansonsten im Sicherheitsmodus die Registrierung auf den Vault blockieren und dessen Funktionen eingeschränkt sind.
 ---
 
 ## Updating Vaultwarden
