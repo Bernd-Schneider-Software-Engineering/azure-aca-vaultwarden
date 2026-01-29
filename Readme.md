@@ -99,7 +99,7 @@ Click **Deploy**.
 ## Post-Deployment Steps (Required for Production)
 
 1. **Configure Custom Domain**
-   - IMPORTANT: THE CONTAINER APP MUST BE RUN TO OBTAIN A MANAGED CERTIFICATE !!!!!
+   - ⚠️ **IMPORTANT: THE CONTAINER APP MUST BE RUN TO OBTAIN A MANAGED CERTIFICATE !!!!!**
    - Add the required CNAME / TXT records shown in the Azure Portal
 
 3. **Enable Managed Certificate**
