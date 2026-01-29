@@ -29,6 +29,13 @@
         "description": "Public URL of your Vaultwarden instance. MUST include https:// (example: https://sub.domain.tld)"
       }
     },
+    "startPaused": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "If true, deploy the Container App with minReplicas=0 (no container instances running). Redeploy with false to start after custom domain + TLS binding is ready."
+      }
+    },
     "vaultwardenImage": {
       "type": "string",
       "defaultValue": "vaultwarden/server:1.34.3",
@@ -130,9 +137,9 @@
     },
     "allowAzureServicesToPostgres": {
       "type": "bool",
-      "defaultValue": false,
+      "defaultValue": true,
       "metadata": {
-        "description": "Allow Azure services to access PostgreSQL (0.0.0.0 firewall rule). Recommended: false."
+        "description": "Allow Azure services to access PostgreSQL (0.0.0.0 firewall rule). Recommended: true for Container Apps without VNet/NAT."
       }
     },
     "storageAccountSku": {
@@ -519,7 +526,7 @@
             }
           ],
           "scale": {
-            "minReplicas": 1,
+            "minReplicas": "[if(parameters('startPaused'), 0, 1)]",
             "maxReplicas": 1
           }
         }
