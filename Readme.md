@@ -99,16 +99,17 @@ Click **Deploy**.
 ## Post-Deployment Steps (Required for Production)
 
 1. **Configure Custom Domain**
+   - IMPORTANT: THE CONTAINER APP MUST BE RUN TO OBTAIN A MANAGED CERTIFICATE !!!!!
    - Add the required CNAME / TXT records shown in the Azure Portal
 
-2. **Enable Managed Certificate**
+3. **Enable Managed Certificate**
    - Azure issues the TLS certificate after DNS verification
 
-3. **Disable HTTP**
+4. **Disable HTTP**
    - Set parameter `allowInsecureHttp = false`
    - Enforces HTTPS-only access
      
-4. **Microsoft Edge Konfiguration: Enhanced Security Mode (Bypass-Liste)**
+5. **Microsoft Edge Konfiguration: Enhanced Security Mode (Bypass-Liste)**
 
      Um einen reibungslosen Zugriff auf interne Ressourcen zu gewährleisten und gleichzeitig die Browsersicherheit zu maximieren, wurde im Microsoft Intune Admin Center eine spezifische Richtlinie für Windows-Geräte konfiguriert. 
 
