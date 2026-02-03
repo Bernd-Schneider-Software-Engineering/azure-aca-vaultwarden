@@ -31,9 +31,9 @@
     },
     "startPaused": {
       "type": "bool",
-      "defaultValue": true,
+      "defaultValue": false,
       "metadata": {
-        "description": "If true, deploy the Container App with minReplicas=0 (no container instances running). Redeploy with false to start after custom domain + TLS binding is ready."
+        "description": "If true, deploy the Container App with minReplicas=0 (paused, no instances running). NOTE: For Azure managed certificates / domain validation the app must be reachable, so set this to false during certificate provisioning."
       }
     },
     "vaultwardenImage": {
@@ -451,7 +451,7 @@
             },
             {
               "name": "database-url",
-              "value": "[format('postgresql://{0}:{1}@{2}:{3}/{4}?sslmode=require', parameters('dbAdminUser'), string(reference(resourceId('Microsoft.Resources/deploymentScripts', format('{0}-ensure-kv-secrets', parameters('appName'))), '2023-08-01').outputs.dbPassword), variables('postgresFqdn'), variables('postgresPort'), variables('postgresDbName'))]"
+              "value": "[format('host={0} port={1} user={2} password={3} dbname={4} sslmode=require', variables('postgresFqdn'), variables('postgresPort'), parameters('dbAdminUser'), string(reference(resourceId('Microsoft.Resources/deploymentScripts', format('{0}-ensure-kv-secrets', parameters('appName'))), '2023-08-01').outputs.dbPassword), variables('postgresDbName'))]"
             }
           ]
         },
