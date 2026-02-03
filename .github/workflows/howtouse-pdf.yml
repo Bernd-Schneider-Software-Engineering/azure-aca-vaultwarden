@@ -1,0 +1,31 @@
+name: Build HowToUse PDF
+
+on:
+  push:
+    paths:
+      - "docs/HowToUse/**"
+  workflow_dispatch:
+
+jobs:
+  build-pdf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pandoc + tex
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pandoc texlive-xetex
+
+      - name: Build PDF
+        run: |
+          pandoc docs/HowToUse/HowToUse.md \
+            -o docs/HowToUse/HowToUse.pdf \
+            --resource-path docs/HowToUse \
+            --pdf-engine=xelatex
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HowToUse-pdf
+          path: docs/HowToUse/HowToUse.pdf
