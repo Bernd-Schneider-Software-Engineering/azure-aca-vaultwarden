@@ -38,7 +38,7 @@
     },
     "vaultwardenImage": {
       "type": "string",
-      "defaultValue": "vaultwarden/server:1.34.3",
+      "defaultValue": "vaultwarden/server:1.35.2-alpine",
       "metadata": {
         "description": "Container image to use for Vaultwarden (pin a version for reproducible deployments)"
       }
@@ -170,6 +170,25 @@
       "metadata": {
         "description": "Comma-separated email domain whitelist for signups (SIGNUPS_DOMAINS_WHITELIST)"
       }
+    },
+    "environment": {
+      "type": "string",
+      "defaultValue": "prod",
+      "allowedValues": [
+        "prod",
+        "test",
+        "dev"
+      ],
+      "metadata": {
+        "description": "Kosten/Zuordnung: Umgebung (prod/test/dev)"
+      }
+    },
+    "bsseRef": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Traceability: BSSE Deploy-Ref (z.B. Git Tag oder Commit SHA)"
+      }
     }
   },
   "variables": {
@@ -185,7 +204,10 @@
     "kvSecretAdminTokenName": "vw-admin-token",
     "kvSecretDbPasswordName": "vw-db-password",
     "roleKeyVaultSecretsOfficer": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7')]",
-    "roleKeyVaultSecretsUser": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')]"
+    "roleKeyVaultSecretsUser": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')]",
+    "kvSecretDatabaseUrlName": "vw-database-url",
+    "kvSecretSmtpPasswordName": "vw-smtp-password",
+    "commonTags": "[createObject('Environment', parameters('environment'), 'bsse:ref', parameters('bsseRef'))]"
   },
   "resources": [
     {
@@ -195,7 +217,8 @@
       "location": "[parameters('location')]",
       "properties": {
         "retentionInDays": 30
-      }
+      },
+      "tags": "[variables('commonTags')]"
     },
     {
       "type": "Microsoft.Storage/storageAccounts",
@@ -210,7 +233,8 @@
         "allowBlobPublicAccess": false,
         "minimumTlsVersion": "TLS1_2",
         "supportsHttpsTrafficOnly": true
-      }
+      },
+      "tags": "[variables('commonTags')]"
     },
     {
       "type": "Microsoft.Storage/storageAccounts/fileServices",
@@ -249,19 +273,22 @@
         "publicNetworkAccess": "Enabled",
         "softDeleteRetentionInDays": 90,
         "enablePurgeProtection": true
-      }
+      },
+      "tags": "[variables('commonTags')]"
     },
     {
       "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
       "apiVersion": "2023-01-31",
       "name": "[format('{0}-id', parameters('appName'))]",
-      "location": "[parameters('location')]"
+      "location": "[parameters('location')]",
+      "tags": "[variables('commonTags')]"
     },
     {
       "type": "Microsoft.ManagedIdentity/userAssignedIdentities",
       "apiVersion": "2023-01-31",
       "name": "[format('{0}-kv-writer-id', parameters('appName'))]",
-      "location": "[parameters('location')]"
+      "location": "[parameters('location')]",
+      "tags": "[variables('commonTags')]"
     },
     {
       "type": "Microsoft.Authorization/roleAssignments",
@@ -326,9 +353,41 @@
           {
             "name": "DB_PASSWORD_VALUE",
             "secureValue": "[parameters('dbPassword')]"
+          },
+          {
+            "name": "SMTP_PASSWORD_SECRET",
+            "value": "[variables('kvSecretSmtpPasswordName')]"
+          },
+          {
+            "name": "SMTP_PASSWORD_VALUE",
+            "secureValue": "[parameters('smtpPassword')]"
+          },
+          {
+            "name": "DATABASE_URL_SECRET",
+            "value": "[variables('kvSecretDatabaseUrlName')]"
+          },
+          {
+            "name": "POSTGRES_FQDN",
+            "value": "[variables('postgresFqdn')]"
+          },
+          {
+            "name": "POSTGRES_PORT",
+            "value": "[string(variables('postgresPort'))]"
+          },
+          {
+            "name": "POSTGRES_DBNAME",
+            "value": "[variables('postgresDbName')]"
+          },
+          {
+            "name": "DB_ADMIN_USER",
+            "value": "[parameters('dbAdminUser')]"
+          },
+          {
+            "name": "TLS_SSLMODE",
+            "value": "require"
           }
         ],
-        "scriptContent": "set -euo pipefail\n\necho \"Ensuring Key Vault secrets exist in $KEYVAULT_NAME ...\"\n\n# --- ADMIN_TOKEN ---\nif az keyvault secret show --vault-name \"$KEYVAULT_NAME\" --name \"$ADMIN_TOKEN_SECRET\" 1>/dev/null 2>/dev/null; then\n  echo \"ADMIN_TOKEN secret already exists.\"\n  ADMIN_TOKEN=$(az keyvault secret show --vault-name \"$KEYVAULT_NAME\" --name \"$ADMIN_TOKEN_SECRET\" --query value -o tsv)\nelse\n  echo \"Creating ADMIN_TOKEN secret...\"\n  ADMIN_TOKEN=$(python3 - << 'PY'\nimport secrets, base64\nprint(base64.urlsafe_b64encode(secrets.token_bytes(48)).decode('utf-8').rstrip('='))\nPY\n)\n  az keyvault secret set --vault-name \"$KEYVAULT_NAME\" --name \"$ADMIN_TOKEN_SECRET\" --value \"$ADMIN_TOKEN\" 1>/dev/null\n  echo \"ADMIN_TOKEN secret created.\"\nfi\n\n# --- DB password ---\nif az keyvault secret show --vault-name \"$KEYVAULT_NAME\" --name \"$DB_PASSWORD_SECRET\" 1>/dev/null 2>/dev/null; then\n  echo \"DB password secret already exists.\"\n  DB_PASSWORD=$(az keyvault secret show --vault-name \"$KEYVAULT_NAME\" --name \"$DB_PASSWORD_SECRET\" --query value -o tsv)\nelse\n  echo \"Creating DB password secret...\"\n  DB_PASSWORD=\"$DB_PASSWORD_VALUE\"\n  az keyvault secret set --vault-name \"$KEYVAULT_NAME\" --name \"$DB_PASSWORD_SECRET\" --value \"$DB_PASSWORD\" 1>/dev/null\n  echo \"DB password secret created.\"\nfi\n\n# Write deployment script outputs (used by Bicep to set Container App secrets)\ncat > \"$AZ_SCRIPTS_OUTPUT_PATH\" <<JSON\n{\n  \"adminToken\": \"$ADMIN_TOKEN\",\n  \"dbPassword\": \"$DB_PASSWORD\"\n}\nJSON\n\necho \"Done.\"\n"
+        "scriptContent": "set -euo pipefail\n\necho \"Ensuring Key Vault secrets exist in $KEYVAULT_NAME ...\"\n\n# --- ADMIN_TOKEN ---\nif az keyvault secret show --vault-name \"$KEYVAULT_NAME\" --name \"$ADMIN_TOKEN_SECRET\" 1>/dev/null 2>/dev/null; then\n  echo \"ADMIN_TOKEN secret already exists.\"\nelse\n  echo \"Creating ADMIN_TOKEN secret...\"\n  ADMIN_TOKEN=$(python3 - << 'PY'\nimport secrets, base64\nprint(base64.urlsafe_b64encode(secrets.token_bytes(48)).decode('utf-8').rstrip('='))\nPY\n)\n  az keyvault secret set --vault-name \"$KEYVAULT_NAME\" --name \"$ADMIN_TOKEN_SECRET\" --value \"$ADMIN_TOKEN\" 1>/dev/null\n  echo \"ADMIN_TOKEN secret created.\"\nfi\n\n# --- DB password ---\nif az keyvault secret show --vault-name \"$KEYVAULT_NAME\" --name \"$DB_PASSWORD_SECRET\" 1>/dev/null 2>/dev/null; then\n  echo \"DB password secret already exists.\"\n  DB_PASSWORD=$(az keyvault secret show --vault-name \"$KEYVAULT_NAME\" --name \"$DB_PASSWORD_SECRET\" --query value -o tsv)\nelse\n  echo \"Creating DB password secret...\"\n  DB_PASSWORD=\"$DB_PASSWORD_VALUE\"\n  az keyvault secret set --vault-name \"$KEYVAULT_NAME\" --name \"$DB_PASSWORD_SECRET\" --value \"$DB_PASSWORD\" 1>/dev/null\n  echo \"DB password secret created.\"\nfi\n\n# --- SMTP password ---\nif az keyvault secret show --vault-name \"$KEYVAULT_NAME\" --name \"$SMTP_PASSWORD_SECRET\" 1>/dev/null 2>/dev/null; then\n  echo \"SMTP password secret already exists.\"\nelse\n  echo \"Creating SMTP password secret...\"\n  az keyvault secret set --vault-name \"$KEYVAULT_NAME\" --name \"$SMTP_PASSWORD_SECRET\" --value \"$SMTP_PASSWORD_VALUE\" 1>/dev/null\n  echo \"SMTP password secret created.\"\nfi\n\n# --- DATABASE_URL (PostgreSQL connection string) ---\nif az keyvault secret show --vault-name \"$KEYVAULT_NAME\" --name \"$DATABASE_URL_SECRET\" 1>/dev/null 2>/dev/null; then\n  echo \"DATABASE_URL secret already exists.\"\nelse\n  echo \"Creating DATABASE_URL secret...\"\n  DATABASE_URL=\"host=$POSTGRES_FQDN port=$POSTGRES_PORT user=$DB_ADMIN_USER password=$DB_PASSWORD dbname=$POSTGRES_DBNAME sslmode=$TLS_SSLMODE\"\n  az keyvault secret set --vault-name \"$KEYVAULT_NAME\" --name \"$DATABASE_URL_SECRET\" --value \"$DATABASE_URL\" 1>/dev/null\n  echo \"DATABASE_URL secret created.\"\nfi\n\n# Non-sensitive output (for troubleshooting/visibility)\ncat > \"$AZ_SCRIPTS_OUTPUT_PATH\" <<JSON\n{\n  \"status\": \"ok\"\n}\nJSON\n\necho \"Done.\"\n"
       },
       "dependsOn": [
         "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
@@ -359,7 +418,8 @@
         "backup": {
           "backupRetentionDays": 7
         }
-      }
+      },
+      "tags": "[variables('commonTags')]"
     },
     {
       "condition": "[parameters('allowAzureServicesToPostgres')]",
@@ -398,7 +458,8 @@
       },
       "dependsOn": [
         "[resourceId('Microsoft.OperationalInsights/workspaces', variables('logAnalyticsName'))]"
-      ]
+      ],
+      "tags": "[variables('commonTags')]"
     },
     {
       "type": "Microsoft.App/managedEnvironments/storages",
@@ -414,7 +475,8 @@
       },
       "dependsOn": [
         "[resourceId('Microsoft.App/managedEnvironments', variables('containerEnvName'))]",
-        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts/fileServices/shares', variables('storageAccountName'), 'default', variables('fileShareName'))]"
       ]
     },
     {
@@ -439,19 +501,18 @@
           "secrets": [
             {
               "name": "admin-token",
-              "value": "[string(reference(resourceId('Microsoft.Resources/deploymentScripts', format('{0}-ensure-kv-secrets', parameters('appName'))), '2023-08-01').outputs.adminToken)]"
-            },
-            {
-              "name": "db-password",
-              "value": "[string(reference(resourceId('Microsoft.Resources/deploymentScripts', format('{0}-ensure-kv-secrets', parameters('appName'))), '2023-08-01').outputs.dbPassword)]"
+              "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-id', parameters('appName')))]",
+              "keyVaultUrl": "[format('https://{0}.vault.azure.net/secrets/{1}', variables('keyVaultName'), variables('kvSecretAdminTokenName'))]"
             },
             {
               "name": "smtp-password",
-              "value": "[parameters('smtpPassword')]"
+              "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-id', parameters('appName')))]",
+              "keyVaultUrl": "[format('https://{0}.vault.azure.net/secrets/{1}', variables('keyVaultName'), variables('kvSecretSmtpPasswordName'))]"
             },
             {
               "name": "database-url",
-              "value": "[format('host={0} port={1} user={2} password={3} dbname={4} sslmode=require', variables('postgresFqdn'), variables('postgresPort'), parameters('dbAdminUser'), string(reference(resourceId('Microsoft.Resources/deploymentScripts', format('{0}-ensure-kv-secrets', parameters('appName'))), '2023-08-01').outputs.dbPassword), variables('postgresDbName'))]"
+              "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-id', parameters('appName')))]",
+              "keyVaultUrl": "[format('https://{0}.vault.azure.net/secrets/{1}', variables('keyVaultName'), variables('kvSecretDatabaseUrlName'))]"
             }
           ]
         },
@@ -506,8 +567,16 @@
                   "value": "[parameters('invitationOrgName')]"
                 },
                 {
+                  "name": "SIGNUPS_ALLOWED",
+                  "value": "[if(empty(parameters('signupsDomainsWhitelist')), 'false', 'true')]"
+                },
+                {
                   "name": "SIGNUPS_DOMAINS_WHITELIST",
                   "value": "[parameters('signupsDomainsWhitelist')]"
+                },
+                {
+                  "name": "EMAIL_2FA_AUTO_FALLBACK",
+                  "value": "true"
                 }
               ],
               "volumeMounts": [
@@ -538,7 +607,8 @@
         "[resourceId('Microsoft.Resources/deploymentScripts', format('{0}-ensure-kv-secrets', parameters('appName')))]",
         "[extensionResourceId(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName')), resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-id', parameters('appName'))), variables('roleKeyVaultSecretsUser')))]",
         "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers/databases', variables('postgresServerName'), variables('postgresDbName'))]"
-      ]
+      ],
+      "tags": "[variables('commonTags')]"
     }
   ],
   "outputs": {

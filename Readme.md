@@ -42,14 +42,21 @@ You can choose between:
 - **Resource Group**  
   All resources will be created inside this group.
 
+- **Environment (Tag / Kostenübersicht)**  
+  Default: `prod` (allowed: `prod`, `test`, `dev`).  
+  Wird als Tag `Environment` auf die Ressourcen geschrieben, damit Azure Cost Management sauber filtern kann.
+
+- **BSSE Deploy Ref (Tag / Traceability)**  
+  Optional aber empfohlen: z. B. Git Tag oder Commit-SHA (z. B. `v1.35.2` oder `1a2b3c4`).  
+  Wird als Tag `bsse:ref` gesetzt, um nachzuvollziehen, welcher Stand deployed wurde.
+
 - **Storage Account Type**  
   Default: `Standard_LRS`  
   For higher resilience you may choose `Standard_GRS`, `ZRS`, etc.
 
-- **Admin API Key**
-  - Generated automatically if not provided
-  - Used to access the `/admin` interface
-  - **Minimum length: 20 characters**
+- **Admin API Token (`/admin`)**
+  - Wird beim Deployment automatisch erzeugt und im **Azure Key Vault** gespeichert
+  - Wird der Container App als Secret (Key Vault Reference) bereitgestellt
 
 - **CPU / Memory sizing**  
   Recommended starting point:
@@ -84,6 +91,10 @@ You can choose between:
   ```
   @ : / ? # % & +
   ```
+
+- **TLS Hinweis (PostgreSQL / `DATABASE_URL`)**  
+  `DATABASE_URL` wird mit `sslmode=require` erzeugt (Transportverschlüsselung aktiv).  
+  Hinweis: `require` erzwingt TLS, prüft aber i. d. R. **nicht** strikt das Server-Zertifikat. Wenn ihr striktere Zertifikatsprüfung wollt (z. B. `verify-full`/CA), muss das Trust-Store/CA-Handling im Container mitgedacht werden.
 
 ---
 
