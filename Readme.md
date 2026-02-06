@@ -47,8 +47,14 @@ You can choose between:
   Wird als Tag `Environment` auf die Ressourcen geschrieben, damit Azure Cost Management sauber filtern kann.
 
 - **BSSE Deploy Ref (Tag / Traceability)**  
-  Optional aber empfohlen: z. B. Git Tag oder Commit-SHA (z. B. `v1.35.2` oder `1a2b3c4`).  
   Wird als Tag `bsse:ref` gesetzt, um nachzuvollziehen, welcher Stand deployed wurde.
+
+  **Automatisch (ohne manuelle Eingabe):**  
+  Wenn `bsseRef` **leer** bleibt, versucht das Template den Ref aus der **Template-URL** des Deployments zu ermitteln (z. B. `main` / `master` / `v1.2.3`), sofern du über einen GitHub/Raw-Link deployest (Deploy-to-Azure Button / Template-Link).  
+  Bei lokalen Deployments ohne Template-Link wird als Fallback `local` gesetzt.
+
+  **Präzise (empfohlen für echte Traceability):**  
+  Wenn du einen **Commit-SHA** oder einen **Release-Tag** in `bsseRef` übergibst, landet genau dieser Wert in `bsse:ref`.
 
 - **Storage Account Type**  
   Default: `Standard_LRS`  
