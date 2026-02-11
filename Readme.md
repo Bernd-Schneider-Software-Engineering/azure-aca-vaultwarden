@@ -13,7 +13,7 @@ http://armviz.io/#/?load=https%3A%2F%2Fraw.githubusercontent.com%2FVertax1337%2F
 
 ---
 ## Endkunden-Dokumentation
-- [Vaultwarden – How to Use (BSSE)](./docs/HowToUse/HowToUse.pdf)
+- [Vaultwarden – How to Use (BSSE)](./docs/HowToUse/HowToUse.md)
 - [Vaultwarden – How to Use (BSSE) PDF-VERSION ](./docs/HowToUse/HowToUse.pdf)
 
 ## Overview
