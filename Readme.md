@@ -37,6 +37,13 @@ You can choose between:
 - **ARM JSON** (portal-friendly, classic)
 - **Bicep** (recommended for technical users & CI/CD)
 
+### Optional: Local deployment (PowerShell)
+If you prefer a scripted deployment (e.g., for repeatability), use:
+
+```powershell
+./scripts/deploy.ps1 -ResourceGroupName <RG-NAME> -Environment prod
+```
+
 ### 2. Fill in the parameters
 
 - **Resource Group**  
@@ -82,21 +89,11 @@ You can choose between:
   | 1.75 | 3.5 Gi |
   | 2.0  | 4.0 Gi |
 
-- **Database admin password**
+ - **Database admin password**
 
-  ⚠️ **IMPORTANT – Password restrictions**
-
-  The PostgreSQL password is embedded into a connection URL (`DATABASE_URL`).  
-  To avoid URL parsing issues, **use only the following characters**:
-
-  ```
-  a–z A–Z 0–9
-  ```
-
-  ❌ Avoid characters like:
-  ```
-  @ : / ? # % & +
-  ```
+  The PostgreSQL **admin password is auto-generated** during deployment and **not stored** in Key Vault.
+  For day-to-day operations Vaultwarden uses a separate **least-privilege database user**.
+  If you ever need admin access, reset the admin password in Azure (Portal/CLI) and connect with the new value.
 
 - **TLS Hinweis (PostgreSQL / `DATABASE_URL`)**  
   `DATABASE_URL` wird mit `sslmode=require` erzeugt (Transportverschlüsselung aktiv).  
@@ -154,19 +151,20 @@ Click **Deploy**.
 
 ## Updating Vaultwarden
 
-By default the container image uses `:latest`, allowing easy updates.
+By default the deployment pins a specific Vaultwarden image version (see the `vaultwardenImage` parameter).
+To update Vaultwarden, create a new revision and set the image tag to the desired version.
 
 1. Azure Portal → Resource Group → **vaultwarden**
 2. **Revisions**
 3. **Create revision**
-4. Keep image set to `latest`
+4. Set the image tag to the desired Vaultwarden version (e.g. `vaultwarden/server:1.35.2-alpine`)
 5. Create revision
 
 ✔ No downtime  
 ✔ Persistent data remains intact  
 ✔ Database migrations are handled automatically
 
-> If required, you can pin a specific image version via the `vaultwardenImage` parameter.
+> Tip: Keep the template parameter `vaultwardenImage` aligned with your preferred version for fresh deployments.
 
 ---
 
