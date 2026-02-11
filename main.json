@@ -339,7 +339,7 @@
         }
       },
       "properties": {
-        "azCliVersion": "2.9.1",
+        "azCliVersion": "2.82.0",
         "timeout": "PT30M",
         "retentionInterval": "P1D",
         "cleanupPreference": "OnSuccess",
