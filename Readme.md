@@ -13,7 +13,7 @@ http://armviz.io/#/?load=https%3A%2F%2Fraw.githubusercontent.com%2FVertax1337%2F
 
 ---
 ## Endkunden-Dokumentation
-- [Vaultwarden – How to Use (BSSE)](./docs/HowToUse/HowToUse.md)
+- [Vaultwarden – How to Use (BSSE)](./docs/HowToUse/HowToUse.pdf)
 - [Vaultwarden – How to Use (BSSE) PDF-VERSION ](./docs/HowToUse/HowToUse.pdf)
 
 ## Overview
@@ -41,8 +41,13 @@ You can choose between:
 If you prefer a scripted deployment (e.g., for repeatability), use:
 
 ```powershell
-./scripts/deploy.ps1 -ResourceGroupName <RG-NAME> -Environment prod
+./scripts/deploy.ps1 -ResourceGroupName <RG-NAME> -Environment prod \
+  -DomainUrl https://vault.example.com \
+  -SmtpFrom vault@example.com \
+  -SmtpUsername vault@example.com
 ```
+
+> Tip: `./deploy.ps1` exists as a small forwarder and simply calls `./scripts/deploy.ps1`.
 
 ### 2. Fill in the parameters
 
@@ -70,6 +75,12 @@ If you prefer a scripted deployment (e.g., for repeatability), use:
 - **Admin API Token (`/admin`)**
   - Wird beim Deployment automatisch erzeugt und im **Azure Key Vault** gespeichert
   - Wird der Container App als Secret (Key Vault Reference) bereitgestellt
+
+- **Key Vault Name (Soft-Delete safe)**
+
+  The Key Vault name is auto-generated with a short random suffix to avoid name collisions with
+  Key Vaults that are still in the **soft-deleted** state.
+  The effective name is shown in the deployment output `keyVaultName`.
 
 - **CPU / Memory sizing**  
   Recommended starting point:

@@ -201,7 +201,7 @@
     "postgresPort": "5432",
     "logAnalyticsName": "[format('{0}-law', parameters('appName'))]",
     "containerEnvName": "[format('{0}-env', parameters('appName'))]",
-    "keyVaultName": "[toLower(format('vwkv{0}', uniqueString(resourceGroup().id)))]",
+    "keyVaultName": "[toLower(format('vwkv{0}{1}', uniqueString(resourceGroup().id), substring(uniqueString(deployment().name),0,4)))]",
     "kvSecretAdminTokenName": "vw-admin-token",
     "roleKeyVaultSecretsOfficer": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7')]",
     "roleKeyVaultSecretsUser": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')]",
