@@ -7,21 +7,15 @@ param(
   [string]$DomainUrl,
 
   # SMTP mode
-  # - $false (Default): Direct Send ohne Auth (Port 25, STARTTLS, MX Lookup im Template)
+  # - $false (Default): Direct Send ohne Auth (Port 25, STARTTLS, MX Lookup anhand der Domain aus DomainUrl)
   # - $true: SMTP Submission mit Auth (z.B. smtp.office365.com:587)
   [Parameter(Mandatory=$false)]
   [bool]$SmtpUseAuth = $false,
 
-  # Für Direct Send: Mail-Domain (MX Lookup), z.B. kunde.tld
-  [Parameter(Mandatory=$false)]
-  [string]$CustomerMailDomain,
-
-  # Optional: Absender-Override. Leer lassen = Template nutzt "$SmtpFromLocalPart@$CustomerMailDomain"
+  # Optional: Absender-Override (z.B. vault@kundendomain.tld).
+  # Leer lassen = Template setzt default auf vault@<BaseDomain aus DomainUrl>
   [Parameter(Mandatory=$false)]
   [string]$SmtpFrom,
-
-  [Parameter(Mandatory=$false)]
-  [string]$SmtpFromLocalPart = "vault",
 
   [Parameter(Mandatory=$false)]
   [string]$SmtpFromName = "Vaultwarden",
@@ -35,8 +29,8 @@ param(
   [string]$SmtpAuthMechanism,
 
   # Optional: SMTP Host Override
-  # - Auth-Mode: smtpHost (z.B. smtp.office365.com)
-  # - Direct Send: smtpHostDirectSend (MX Endpoint). Leer lassen = MX Lookup.
+  # - Direct Send: leer = MX Lookup anhand BaseDomain aus DomainUrl
+  # - Auth-Mode: leer = smtp.office365.com
   [Parameter(Mandatory=$false)]
   [string]$SmtpHost,
 
@@ -86,21 +80,16 @@ if ([string]::IsNullOrWhiteSpace($DomainUrl)) {
 
 # --- SMTP Eingaben abhängig vom Modus ---
 if (-not $SmtpUseAuth) {
-  if ([string]::IsNullOrWhiteSpace($CustomerMailDomain)) {
-    $CustomerMailDomain = Read-Host "Customer Mail Domain for Direct Send (e.g. kunde.tld)"
-  }
-  # SmtpFrom ist optional – Template leitet sonst vault@kunde.tld ab
-  if ([string]::IsNullOrWhiteSpace($SmtpFrom)) {
-    $SmtpFrom = ""
-  }
-  if ([string]::IsNullOrWhiteSpace($SmtpHost)) {
-    $SmtpHost = "" # Template macht MX Lookup, wenn Host leer
-  }
+  # Direct Send: Keine Pflichtangaben außer DomainUrl.
+  # - SmtpHost leer lassen = Template macht MX Lookup.
+  # - SmtpFrom leer lassen = Template baut vault@<base-domain aus DomainUrl>.
+  if ([string]::IsNullOrWhiteSpace($SmtpFrom)) { $SmtpFrom = "" }
+  if ([string]::IsNullOrWhiteSpace($SmtpHost)) { $SmtpHost = "" }
 }
 else {
   # Auth-Mode: SMTP Host/Port/Security können optional übergeben werden
   if ([string]::IsNullOrWhiteSpace($SmtpHost)) {
-    $SmtpHost = Read-Host "SMTP Host (e.g. smtp.office365.com)"
+    $SmtpHost = Read-Host "SMTP Host (leer = smtp.office365.com)"
   }
   if (-not $SmtpPort) {
     $SmtpPort = [int](Read-Host "SMTP Port (e.g. 587)")
@@ -138,26 +127,16 @@ try {
       bsseRef     = @{ value = $BsseRef }
       domainUrl   = @{ value = $DomainUrl }
       smtpUseAuth = @{ value = $SmtpUseAuth }
-      customerMailDomain = @{ value = $CustomerMailDomain }
-      smtpFromLocalPart  = @{ value = $SmtpFromLocalPart }
-      smtpFromName       = @{ value = $SmtpFromName }
-      heloName           = @{ value = $HeloName }
-      smtpAuthMechanism  = @{ value = $SmtpAuthMechanism }
-      smtpFrom           = @{ value = $SmtpFrom }
-      # smtpHost / smtpHostDirectSend werden je nach Modus gesetzt
-      smtpPort           = @{ value = $SmtpPort }
-      smtpSecurity       = @{ value = $SmtpSecurity }
-      smtpUsername       = @{ value = $SmtpUsername }
+      smtpFromName      = @{ value = $SmtpFromName }
+      heloName          = @{ value = $HeloName }
+      smtpAuthMechanism = @{ value = $SmtpAuthMechanism }
+      smtpFrom          = @{ value = $SmtpFrom }
+      smtpHost          = @{ value = $SmtpHost }
+      smtpPort          = @{ value = $SmtpPort }
+      smtpSecurity      = @{ value = $SmtpSecurity }
+      smtpUsername      = @{ value = $SmtpUsername }
       # smtpPassword wird nur gesetzt, wenn Auth-Mode aktiv ist
     }
-  }
-
-  if ($SmtpUseAuth) {
-    $params.parameters.smtpHost = @{ value = $SmtpHost }
-  }
-  else {
-    # Direct Send: Host optional übersteuerbar. Leer = MX Lookup.
-    $params.parameters.smtpHostDirectSend = @{ value = $SmtpHost }
   }
 
   if ($SmtpUseAuth -and $SmtpPassword) {

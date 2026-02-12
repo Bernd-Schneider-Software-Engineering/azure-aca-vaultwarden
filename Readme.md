@@ -38,21 +38,23 @@ Das Template unterstützt zwei Betriebsarten:
 
 - **Default:** `smtpUseAuth = false`
 - Es werden **keine** Env-Variablen/Secrets für `SMTP_USERNAME`, `SMTP_PASSWORD` oder `SMTP_AUTH_MECHANISM` angelegt.
-- `SMTP_HOST` wird **automatisch** via MX-Lookup aus `customerMailDomain` ermittelt (optional übersteuerbar über `smtpHostDirectSend`).
+- `SMTP_HOST` wird **automatisch** via **MX-Lookup** ermittelt – basierend auf der Domain aus `domainUrl`.
+- `SMTP_FROM` wird automatisch auf `vault@kundendomain.tld` gesetzt (ebenfalls aus `domainUrl` abgeleitet).
 
-**Erforderliche Parameter:**
-- `customerMailDomain = kundendomain.tld` (Pflicht, für MX-Lookup)
-- `smtpFromLocalPart` (Default: `vault`)
-- Optional: `smtpFromName`, `heloName`
+**Wichtig (Ableitung der Domain):**  
+Aus `domainUrl` wird der Hostname extrahiert (z. B. `vault.kunde.tld`) und als **Base-Domain** standardmäßig die letzten **2 Labels** verwendet (→ `kunde.tld`).  
+Falls du exotische Public-Suffixes hast (z. B. `co.uk`) oder bewusst eine andere Mail-Domain brauchst, setze **manuell**:
+- `smtpHost` (Override des SMTP Hosts, statt MX-Lookup)
+- `smtpFrom` (Override der Absenderadresse)
 
-**Wichtig:** Direct Send ist für **interne Empfänger** gedacht (User/Postfächer/Shared Mailboxes im gleichen Tenant).
-Wenn du an **externe** Empfänger senden willst oder SPF/DMARC sauber über M365 laufen soll, nutze Modus B (SMTP Auth).
+**Hinweis:** Direct Send ist für **interne Empfänger** gedacht (User/Postfächer/Shared Mailboxes im gleichen Tenant).
+Wenn du an **externe** Empfänger senden willst oder SMTP Auth erzwingen musst, nutze Modus B.
 
 ### B) SMTP Auth (optional, auch für extern)
 
 - `smtpUseAuth = true`
-- `smtpHost = smtp.office365.com` (Default)
-- `smtpPort = 587` (Default)
+- `SMTP_HOST`: Default `smtp.office365.com` (kann über `smtpHost` überschrieben werden)
+- `smtpPort`: Default `587`
 - `smtpUsername` + `smtpPassword` sind Pflicht
 - Optional: `smtpAuthMechanism`, `smtpFromName`, `heloName`
 
@@ -60,12 +62,9 @@ Wenn du an **externe** Empfänger senden willst oder SPF/DMARC sauber über M365
 
 ## Manueller Schritt (Direct Send): Absender-Adresse/Shared Mailbox
 
-Die Anlage eines (freigegebenen) Postfachs wird **nicht** automatisch im Deployment gemacht (bewusst: Tenant-Admin-Rechte, Governance, Wunsch nach Trennung IaC/Identity).
+Die Anlage eines (freigegebenen) Postfachs wird **nicht** automatisch im Deployment gemacht (bewusst: Tenant-Admin-Rechte, Governance, Trennung IaC/Identity).
 
-Empfehlung: Lege ein freigegebenes Postfach an, z. B. `vault@kundendomain.tld`, und verwende es als Absender:
-
-- `smtpFromLocalPart = vault`
-- `customerMailDomain = kundendomain.tld`
+Empfehlung: Lege ein freigegebenes Postfach an, z. B. `vault@kundendomain.tld`, und nutze dieses als Absender.
 
 Beispiel (Exchange Online PowerShell):
 
@@ -76,6 +75,7 @@ New-Mailbox -Shared -Name "Vaultwarden" -Alias "vault" -PrimarySmtpAddress "vaul
 ---
 
 ## Deployment
+
 
 ### 1. Click **Deploy to Azure**
 You can choose between:
@@ -89,7 +89,6 @@ If you prefer a scripted deployment (e.g., for repeatability), use:
 ./scripts/deploy.ps1 -ResourceGroupName <RG-NAME> -Environment prod \
   -DomainUrl https://vault.example.com \
   -SmtpUseAuth:$false \
-  -CustomerMailDomain kunde.tld
 ```
 
 > Tip: `./deploy.ps1` exists as a small forwarder and simply calls `./scripts/deploy.ps1`.
