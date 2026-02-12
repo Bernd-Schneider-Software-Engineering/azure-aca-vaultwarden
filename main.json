@@ -68,7 +68,14 @@
       "type": "string",
       "defaultValue": "smtp.office365.com",
       "metadata": {
-        "description": "SMTP host (M365 default: smtp.office365.com)"
+        "description": "SMTP host f\u00fcr authentifiziertes SMTP Submission (M365 default: smtp.office365.com). Wird bei Direct Send ignoriert."
+      }
+    },
+    "smtpHostDirectSend": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional: SMTP Host f\u00fcr Direct Send (MX Endpoint). Leer lassen = automatisch per MX Lookup aus customerMailDomain ermitteln."
       }
     },
     "smtpPort": {
@@ -94,19 +101,22 @@
       "type": "string",
       "metadata": {
         "description": "SMTP FROM address (e.g. vaultwarden@domain.tld)"
-      }
+      },
+      "defaultValue": ""
     },
     "smtpUsername": {
       "type": "string",
       "metadata": {
         "description": "SMTP username (often same as smtpFrom)"
-      }
+      },
+      "defaultValue": ""
     },
     "smtpPassword": {
       "type": "securestring",
       "metadata": {
         "description": "SMTP password"
-      }
+      },
+      "defaultValue": ""
     },
     "dbAdminUser": {
       "type": "string",
@@ -190,6 +200,48 @@
       "metadata": {
         "description": "Traceability: BSSE Deploy-Ref (z.B. Git Tag oder Commit SHA)"
       }
+    },
+    "smtpUseAuth": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Wenn true, nutzt Vaultwarden SMTP Submission mit Auth (SMTP_USERNAME/SMTP_PASSWORD). Wenn false, wird Direct Send ohne Auth verwendet."
+      }
+    },
+    "customerMailDomain": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "E-Mail-Domain f\u00fcr Direct Send (MX Lookup), z.B. 'kunde.tld'. Optional, falls SMTP_HOST explizit gesetzt wird."
+      }
+    },
+    "smtpFromLocalPart": {
+      "type": "string",
+      "defaultValue": "vault",
+      "metadata": {
+        "description": "Lokaler Teil der Absenderadresse f\u00fcr Direct Send, z.B. 'vault' f\u00fcr vault@kunde.tld."
+      }
+    },
+    "smtpFromName": {
+      "type": "string",
+      "defaultValue": "Vaultwarden",
+      "metadata": {
+        "description": "Anzeigename im From-Header."
+      }
+    },
+    "heloName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Servername im SMTP HELO/EHLO. Leer lassen = Hostname aus DOMAIN-URL."
+      }
+    },
+    "smtpAuthMechanism": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional: SMTP Auth Mechanism, z.B. 'Plain', 'Login' oder 'Xoauth2' (kommagetrennt m\u00f6glich)."
+      }
     }
   },
   "variables": {
@@ -213,7 +265,105 @@
     "bsseRefEffective": "[if(empty(variables('bsseRefRaw')), '', substring(variables('bsseRefRaw'), 0, min(length(variables('bsseRefRaw')), 256)))]",
     "commonTags": "[createObject('Environment', parameters('environment'), 'bsse:ref', variables('bsseRefEffective'))]",
     "kvSecretDbAppPasswordName": "vw-db-app-password",
-    "dbAppUser": "vw_app"
+    "dbAppUser": "vw_app",
+    "domainHostDefault": "[split(replace(replace(parameters('domainUrl'),'https://',''),'http://',''),'/')[0]]",
+    "vwEnvBase": [
+      {
+        "name": "ADMIN_TOKEN",
+        "secretRef": "admin-token"
+      },
+      {
+        "name": "DATABASE_URL",
+        "secretRef": "database-url"
+      },
+      {
+        "name": "DOMAIN",
+        "value": "[parameters('domainUrl')]"
+      },
+      {
+        "name": "EMAIL_2FA_AUTO_FALLBACK",
+        "value": "false"
+      },
+      {
+        "name": "HTTP_REQUEST_BLOCK_NON_GLOBAL_IPS",
+        "value": "true"
+      },
+      {
+        "name": "INVITATIONS_ALLOWED",
+        "value": "true"
+      },
+      {
+        "name": "INVITATION_ORG_NAME",
+        "value": "[parameters('invitationOrgName')]"
+      },
+      {
+        "name": "SHOW_PASSWORD_HINT",
+        "value": "false"
+      },
+      {
+        "name": "SIGNUPS_ALLOWED",
+        "value": "false"
+      },
+      {
+        "name": "SIGNUPS_DOMAINS_WHITELIST",
+        "value": "[parameters('signupsDomainsWhitelist')]"
+      }
+    ],
+    "vwEnvSmtpCommon": [
+      {
+        "name": "SMTP_FROM",
+        "value": "[if(empty(parameters('smtpFrom')), format('{0}@{1}', parameters('smtpFromLocalPart'), parameters('customerMailDomain')), parameters('smtpFrom'))]"
+      },
+      {
+        "name": "SMTP_FROM_NAME",
+        "value": "[parameters('smtpFromName')]"
+      },
+      {
+        "name": "HELO_NAME",
+        "value": "[if(empty(parameters('heloName')), variables('domainHostDefault'), parameters('heloName'))]"
+      },
+      {
+        "name": "SMTP_HOST",
+        "value": "[if(parameters('smtpUseAuth'), parameters('smtpHost'), reference(resourceId('Microsoft.Resources/deploymentScripts', format('{0}-ensure-kv-secrets', parameters('appName'))), '2023-08-01').outputs.smtp_host)]"
+      },
+      {
+        "name": "SMTP_PORT",
+        "value": "[if(parameters('smtpUseAuth'), string(parameters('smtpPort')), '25')]"
+      },
+      {
+        "name": "SMTP_SECURITY",
+        "value": "[if(parameters('smtpUseAuth'), parameters('smtpSecurity'), 'starttls')]"
+      }
+    ],
+    "vwEnvSmtpAuthCore": [
+      {
+        "name": "SMTP_USERNAME",
+        "value": "[parameters('smtpUsername')]"
+      },
+      {
+        "name": "SMTP_PASSWORD",
+        "secretRef": "smtp-password"
+      }
+    ],
+    "vwSecretsBase": [
+      {
+        "name": "admin-token",
+        "keyVaultUrl": "[format('https://{0}.vault.azure.net/secrets/{1}', variables('keyVaultName'), variables('kvSecretAdminTokenName'))]",
+        "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-id', parameters('appName')))]"
+      },
+      {
+        "name": "database-url",
+        "keyVaultUrl": "[format('https://{0}.vault.azure.net/secrets/{1}', variables('keyVaultName'), variables('kvSecretDatabaseUrlName'))]",
+        "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-id', parameters('appName')))]"
+      }
+    ],
+    "vwSecretsSmtp": [
+      {
+        "name": "smtp-password",
+        "keyVaultUrl": "[format('https://{0}.vault.azure.net/secrets/{1}', variables('keyVaultName'), variables('kvSecretSmtpPasswordName'))]",
+        "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-id', parameters('appName')))]"
+      }
+    ]
   },
   "resources": [
     {
@@ -403,9 +553,21 @@
           {
             "name": "UAMI_CLIENT_ID",
             "value": "[reference(resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-kv-writer-id', parameters('appName'))), '2018-11-30').clientId]"
+          },
+          {
+            "name": "SMTP_USE_AUTH",
+            "value": "[string(parameters('smtpUseAuth'))]"
+          },
+          {
+            "name": "SMTP_HOST_INPUT",
+            "value": "[if(parameters('smtpUseAuth'), parameters('smtpHost'), parameters('smtpHostDirectSend'))]"
+          },
+          {
+            "name": "CUSTOMER_MAIL_DOMAIN",
+            "value": "[parameters('customerMailDomain')]"
           }
         ],
-        "scriptContent": "set -euo pipefail\n\necho \"[vault-ensure-kv-secrets] ensuring Key Vault secrets exist in $KEYVAULT_NAME ...\"\n\n# Ensure we are authenticated (deploymentScripts should use the assigned managed identity, but harden against missing session)\nif ! az account show 1>/dev/null 2>/dev/null; then\n  echo \"[vault-ensure-kv-secrets] az account not available - logging in with managed identity\"\n  if [ -n \"${UAMI_CLIENT_ID:-}\" ]; then\n    az login --identity --client-id \"$UAMI_CLIENT_ID\" 1>/dev/null\n  else\n    az login --identity 1>/dev/null\n  fi\nfi\n\n# ------------------------------------------------------------\n# PostgreSQL tooling\n# ------------------------------------------------------------\n# Prefer psql, but deploymentScripts can run on different Linux base images where package managers vary.\n# If we cannot install psql, fall back to a pure-Python driver (pg8000).\n\nUSE_PYPG=0\n\nif ! command -v psql 1>/dev/null 2>/dev/null; then\n  echo \"[vault-ensure-kv-secrets] psql not found - attempting to install PostgreSQL client\"\n  echo \"[vault-ensure-kv-secrets] OS info:\"\n  (cat /etc/os-release || true) | sed 's/^/[vault-ensure-kv-secrets]   /'\n\n  echo \"[vault-ensure-kv-secrets] Detected package managers:\"\n  for c in apk tdnf apt-get yum dnf microdnf; do\n    if command -v \"$c\" 1>/dev/null 2>/dev/null; then\n      echo \"[vault-ensure-kv-secrets]   - $c\"\n    fi\n  done\n\n  if command -v apk 1>/dev/null 2>/dev/null; then\n    echo \"[vault-ensure-kv-secrets] installing via apk ...\"\n    apk update\n    apk add --no-cache postgresql-client 2>/dev/null || apk add --no-cache postgresql\n  elif command -v tdnf 1>/dev/null 2>/dev/null; then\n    echo \"[vault-ensure-kv-secrets] installing via tdnf ...\"\n    tdnf install -y postgresql 2>/dev/null || tdnf install -y postgresql-client\n  elif command -v apt-get 1>/dev/null 2>/dev/null; then\n    echo \"[vault-ensure-kv-secrets] installing via apt-get ...\"\n    if [ \"$(id -u)\" -ne 0 ] && command -v sudo 1>/dev/null 2>/dev/null; then\n      SUDO=\"sudo\"\n    else\n      SUDO=\"\"\n    fi\n    $SUDO apt-get update -y\n    $SUDO apt-get install -y postgresql-client\n  elif command -v yum 1>/dev/null 2>/dev/null; then\n    echo \"[vault-ensure-kv-secrets] installing via yum ...\"\n    yum install -y postgresql\n  elif command -v dnf 1>/dev/null 2>/dev/null; then\n    echo \"[vault-ensure-kv-secrets] installing via dnf ...\"\n    dnf install -y postgresql\n  elif command -v microdnf 1>/dev/null 2>/dev/null; then\n    echo \"[vault-ensure-kv-secrets] installing via microdnf ...\"\n    microdnf install -y postgresql\n  else\n    echo \"[vault-ensure-kv-secrets] No supported package manager found. Falling back to pure-Python pg8000.\"\n    USE_PYPG=1\n  fi\n\n  if [ \"$USE_PYPG\" -eq 0 ] && ! command -v psql 1>/dev/null 2>/dev/null; then\n    echo \"[vault-ensure-kv-secrets] WARNING: psql install path did not yield psql. Falling back to pure-Python pg8000.\"\n    USE_PYPG=1\n  fi\nfi\n\n# If using python fallback, ensure pg8000 is available (pure python, no system libpq needed)\nif [ \"$USE_PYPG\" -eq 1 ]; then\n  echo \"[vault-ensure-kv-secrets] ensuring python driver pg8000 is available ...\"\n  python3 -m pip install --no-cache-dir -q pg8000\nfi\n\n# ------------------------------------------------------------\n# Wait for Key Vault RBAC/permissions to become effective\n# ------------------------------------------------------------\necho \"[vault-ensure-kv-secrets] waiting for Key Vault permissions...\"\nfor i in $(seq 1 30); do\n  if az keyvault secret list --vault-name \"$KEYVAULT_NAME\" --maxresults 1 1>/dev/null 2>/dev/null; then\n    echo \"[vault-ensure-kv-secrets] Key Vault access OK\"\n    break\n  fi\n  echo \"[vault-ensure-kv-secrets] Key Vault access not ready yet ($i/30), sleeping 10s...\"\n  sleep 10\n  if [ \"$i\" -eq 30 ]; then\n    echo \"[vault-ensure-kv-secrets] ERROR: Key Vault permissions not ready after 300s\"\n    exit 1\n  fi\ndone\n\n# ------------------------------------------------------------\n# Wait for PostgreSQL to accept connections\n# ------------------------------------------------------------\necho \"[vault-ensure-kv-secrets] waiting for PostgreSQL connectivity...\"\nexport PGPASSWORD=\"${DB_ADMIN_PASSWORD}\"\n\nif [ \"$USE_PYPG\" -eq 0 ]; then\n  PG_CONN_ADMIN=\"host=${POSTGRES_FQDN} port=${POSTGRES_PORT} dbname=postgres user=${DB_ADMIN_USER} sslmode=${TLS_SSLMODE}\"\n  for i in $(seq 1 30); do\n    if psql \"${PG_CONN_ADMIN}\" -v ON_ERROR_STOP=1 -c \"SELECT 1\" 1>/dev/null 2>/dev/null; then\n      echo \"[vault-ensure-kv-secrets] PostgreSQL reachable\"\n      break\n    fi\n    echo \"[vault-ensure-kv-secrets] PostgreSQL not ready yet ($i/30), sleeping 10s...\"\n    sleep 10\n    if [ \"$i\" -eq 30 ]; then\n      echo \"[vault-ensure-kv-secrets] ERROR: PostgreSQL not reachable after 300s\"\n      exit 1\n    fi\n  done\nelse\n  python3 - <<'PY'\nimport os, time, ssl\nimport pg8000\n\nhost=os.environ[\"POSTGRES_FQDN\"]\nport=int(os.environ.get(\"POSTGRES_PORT\",\"5432\"))\nuser=os.environ[\"DB_ADMIN_USER\"]\npw=os.environ[\"DB_ADMIN_PASSWORD\"]\ndb=\"postgres\"\n\n# Match \"sslmode=require\" semantics: encryption without hostname / chain validation\nctx=ssl.create_default_context()\nctx.check_hostname=False\nctx.verify_mode=ssl.CERT_NONE\n\nfor i in range(30):\n  try:\n    conn=pg8000.connect(host=host, port=port, user=user, password=pw, database=db, ssl_context=ctx, timeout=10)\n    conn.autocommit=True\n    cur=conn.cursor()\n    cur.execute(\"SELECT 1\")\n    cur.close()\n    conn.close()\n    print(\"[vault-ensure-kv-secrets] PostgreSQL reachable\")\n    break\n  except Exception as e:\n    print(f\"[vault-ensure-kv-secrets] PostgreSQL not ready yet ({i+1}/30): {e}\")\n    time.sleep(10)\nelse:\n  raise SystemExit(\"[vault-ensure-kv-secrets] ERROR: PostgreSQL not reachable after 300s\")\nPY\nfi\n\n# ------------------------------------------------------------\n# Secrets in Key Vault\n# ------------------------------------------------------------\n\n# --- ADMIN_TOKEN ---\nif az keyvault secret show --vault-name \"$KEYVAULT_NAME\" --name \"$ADMIN_TOKEN_SECRET\" 1>/dev/null 2>/dev/null; then\n  echo \"ADMIN_TOKEN secret already exists.\"\nelse\n  echo \"Creating ADMIN_TOKEN secret...\"\n  ADMIN_TOKEN=$(python3 - << 'PY'\nimport secrets, base64\nprint(base64.urlsafe_b64encode(secrets.token_bytes(48)).decode('utf-8').rstrip('='))\nPY\n)\n  az keyvault secret set --vault-name \"$KEYVAULT_NAME\" --name \"$ADMIN_TOKEN_SECRET\" --value \"$ADMIN_TOKEN\" 1>/dev/null\n  echo \"ADMIN_TOKEN secret created.\"\nfi\n\n# --- SMTP password ---\nif az keyvault secret show --vault-name \"$KEYVAULT_NAME\" --name \"$SMTP_PASSWORD_SECRET\" 1>/dev/null 2>/dev/null; then\n  echo \"SMTP password secret already exists.\"\nelse\n  echo \"Creating SMTP password secret...\"\n  az keyvault secret set --vault-name \"$KEYVAULT_NAME\" --name \"$SMTP_PASSWORD_SECRET\" --value \"$SMTP_PASSWORD_VALUE\" 1>/dev/null\n  echo \"SMTP password secret created.\"\nfi\n\n# --- App DB password (least-privilege user for Vaultwarden) ---\nif az keyvault secret show --vault-name \"$KEYVAULT_NAME\" --name \"$DB_APP_PASSWORD_SECRET\" 1>/dev/null 2>/dev/null; then\n  echo \"App DB password secret already exists.\"\n  DB_APP_PASSWORD=$(az keyvault secret show --vault-name \"$KEYVAULT_NAME\" --name \"$DB_APP_PASSWORD_SECRET\" --query value -o tsv)\nelse\n  echo \"Creating App DB password secret...\"\n  DB_APP_PASSWORD=$(python3 - << 'PY'\nimport secrets\nprint(secrets.token_urlsafe(32))  # safe chars for SQL + URL encoding later\nPY\n)\n  az keyvault secret set --vault-name \"$KEYVAULT_NAME\" --name \"$DB_APP_PASSWORD_SECRET\" --value \"$DB_APP_PASSWORD\" 1>/dev/null\n  echo \"App DB password secret created.\"\nfi\n\nexport DB_APP_PASSWORD=\"$DB_APP_PASSWORD\"\n\n# ------------------------------------------------------------\n# Provision least-privilege role & grants (idempotent)\n# ------------------------------------------------------------\necho \"Provisioning Postgres role '$DB_APP_USER' and database privileges (idempotent) ...\"\n\nif [ \"$USE_PYPG\" -eq 0 ]; then\n  PG_CONN_ADMIN=\"host=${POSTGRES_FQDN} port=${POSTGRES_PORT} dbname=postgres user=${DB_ADMIN_USER} sslmode=${TLS_SSLMODE}\"\n  psql \"${PG_CONN_ADMIN}\" -v ON_ERROR_STOP=1 <<SQL 1>/dev/null\nDO \\$\\$\nBEGIN\n  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${DB_APP_USER}') THEN\n    CREATE ROLE \"${DB_APP_USER}\" LOGIN PASSWORD '${DB_APP_PASSWORD}';\n  END IF;\nEND\n\\$\\$;\n\nALTER ROLE \"${DB_APP_USER}\"\n  WITH LOGIN PASSWORD '${DB_APP_PASSWORD}'\n  NOCREATEDB NOCREATEROLE NOINHERIT;\n\nGRANT CONNECT ON DATABASE \"${POSTGRES_DBNAME}\" TO \"${DB_APP_USER}\";\nSQL\n\n  PG_CONN_VWDB=\"host=${POSTGRES_FQDN} port=${POSTGRES_PORT} dbname=${POSTGRES_DBNAME} user=${DB_ADMIN_USER} sslmode=${TLS_SSLMODE}\"\n  psql \"${PG_CONN_VWDB}\" -v ON_ERROR_STOP=1 <<SQL 1>/dev/null\nGRANT USAGE, CREATE ON SCHEMA public TO \"${DB_APP_USER}\";\nSQL\nelse\n  python3 - <<'PY'\nimport os, ssl\nimport pg8000\n\nhost=os.environ[\"POSTGRES_FQDN\"]\nport=int(os.environ.get(\"POSTGRES_PORT\",\"5432\"))\nadmin_user=os.environ[\"DB_ADMIN_USER\"]\nadmin_pw=os.environ[\"DB_ADMIN_PASSWORD\"]\ndb_name=os.environ[\"POSTGRES_DBNAME\"]\napp_user=os.environ[\"DB_APP_USER\"]\napp_pw=os.environ[\"DB_APP_PASSWORD\"]\n\nctx=ssl.create_default_context()\nctx.check_hostname=False\nctx.verify_mode=ssl.CERT_NONE\n\ndef run(database, sql):\n  conn=pg8000.connect(host=host, port=port, user=admin_user, password=admin_pw, database=database, ssl_context=ctx, timeout=20)\n  conn.autocommit=True\n  cur=conn.cursor()\n  cur.execute(sql)\n  cur.close()\n  conn.close()\n\nsql_admin = (\n  \"DO $$\\n\"\n  \"BEGIN\\n\"\n  f\"  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '{app_user}') THEN\\n\"\n  f\"    CREATE ROLE \\\"{app_user}\\\" LOGIN PASSWORD '{app_pw}';\\n\"\n  \"  END IF;\\n\"\n  \"END\\n\"\n  \"$$;\\n\\n\"\n  f\"ALTER ROLE \\\"{app_user}\\\" WITH LOGIN PASSWORD '{app_pw}' NOCREATEDB NOCREATEROLE NOINHERIT;\\n\"\n  f\"GRANT CONNECT ON DATABASE \\\"{db_name}\\\" TO \\\"{app_user}\\\";\\n\"\n)\n\nrun(\"postgres\", sql_admin)\nrun(db_name, f\"GRANT USAGE, CREATE ON SCHEMA public TO \\\"{app_user}\\\";\")\n\nprint(\"Postgres provisioning done.\")\nPY\nfi\n\n# ------------------------------------------------------------\n# DATABASE_URL (PostgreSQL connection string for Vaultwarden)\n# ------------------------------------------------------------\nENCODED_APP_PASSWORD=$(python3 - << 'PY'\nimport os, urllib.parse\nprint(urllib.parse.quote(os.environ.get(\"DB_APP_PASSWORD\",\"\"), safe=\"\"))\nPY\n)\n\nDATABASE_URL=\"postgresql://${DB_APP_USER}:${ENCODED_APP_PASSWORD}@${POSTGRES_FQDN}:${POSTGRES_PORT}/${POSTGRES_DBNAME}?sslmode=${TLS_SSLMODE}\"\n\nif az keyvault secret show --vault-name \"$KEYVAULT_NAME\" --name \"$DATABASE_URL_SECRET\" 1>/dev/null 2>/dev/null; then\n  CURRENT_DBURL=$(az keyvault secret show --vault-name \"$KEYVAULT_NAME\" --name \"$DATABASE_URL_SECRET\" --query value -o tsv || echo \"\")\n  if echo \"$CURRENT_DBURL\" | grep -qiE '^postgres(ql)?://'; then\n    if echo \"$CURRENT_DBURL\" | grep -q \"://${DB_ADMIN_USER}:\"; then\n      echo \"DATABASE_URL currently uses admin user; updating to app user...\"\n      az keyvault secret set --vault-name \"$KEYVAULT_NAME\" --name \"$DATABASE_URL_SECRET\" --value \"$DATABASE_URL\" 1>/dev/null\n      echo \"DATABASE_URL secret updated.\"\n    else\n      echo \"DATABASE_URL secret already exists and looks valid.\"\n    fi\n  else\n    echo \"DATABASE_URL secret exists but looks invalid; updating to PostgreSQL URL...\"\n    az keyvault secret set --vault-name \"$KEYVAULT_NAME\" --name \"$DATABASE_URL_SECRET\" --value \"$DATABASE_URL\" 1>/dev/null\n    echo \"DATABASE_URL secret updated.\"\n  fi\nelse\n  echo \"Creating DATABASE_URL secret...\"\n  az keyvault secret set --vault-name \"$KEYVAULT_NAME\" --name \"$DATABASE_URL_SECRET\" --value \"$DATABASE_URL\" 1>/dev/null\n  echo \"DATABASE_URL secret created.\"\nfi\n\n# Non-sensitive output (for troubleshooting/visibility)\ncat > \"$AZ_SCRIPTS_OUTPUT_PATH\" <<JSON\n{\n  \"status\": \"ok\"\n}\nJSON\n\necho \"Done.\"\n"
+        "scriptContent": "set -euo pipefail\n\necho \"[vault-ensure-kv-secrets] ensuring Key Vault secrets exist in $KEYVAULT_NAME ...\"\n\n# Ensure we are authenticated (deploymentScripts should use the assigned managed identity, but harden against missing session)\nif ! az account show 1>/dev/null 2>/dev/null; then\n  echo \"[vault-ensure-kv-secrets] az account not available - logging in with managed identity\"\n  if [ -n \"${UAMI_CLIENT_ID:-}\" ]; then\n    az login --identity --client-id \"$UAMI_CLIENT_ID\" 1>/dev/null\n  else\n    az login --identity 1>/dev/null\n  fi\nfi\n\n# ------------------------------------------------------------\n# PostgreSQL tooling\n# ------------------------------------------------------------\n# Prefer psql, but deploymentScripts can run on different Linux base images where package managers vary.\n# If we cannot install psql, fall back to a pure-Python driver (pg8000).\n\nUSE_PYPG=0\n\nif ! command -v psql 1>/dev/null 2>/dev/null; then\n  echo \"[vault-ensure-kv-secrets] psql not found - attempting to install PostgreSQL client\"\n  echo \"[vault-ensure-kv-secrets] OS info:\"\n  (cat /etc/os-release || true) | sed 's/^/[vault-ensure-kv-secrets]   /'\n\n  echo \"[vault-ensure-kv-secrets] Detected package managers:\"\n  for c in apk tdnf apt-get yum dnf microdnf; do\n    if command -v \"$c\" 1>/dev/null 2>/dev/null; then\n      echo \"[vault-ensure-kv-secrets]   - $c\"\n    fi\n  done\n\n  if command -v apk 1>/dev/null 2>/dev/null; then\n    echo \"[vault-ensure-kv-secrets] installing via apk ...\"\n    apk update\n    apk add --no-cache postgresql-client 2>/dev/null || apk add --no-cache postgresql\n  elif command -v tdnf 1>/dev/null 2>/dev/null; then\n    echo \"[vault-ensure-kv-secrets] installing via tdnf ...\"\n    tdnf install -y postgresql 2>/dev/null || tdnf install -y postgresql-client\n  elif command -v apt-get 1>/dev/null 2>/dev/null; then\n    echo \"[vault-ensure-kv-secrets] installing via apt-get ...\"\n    if [ \"$(id -u)\" -ne 0 ] && command -v sudo 1>/dev/null 2>/dev/null; then\n      SUDO=\"sudo\"\n    else\n      SUDO=\"\"\n    fi\n    $SUDO apt-get update -y\n    $SUDO apt-get install -y postgresql-client\n  elif command -v yum 1>/dev/null 2>/dev/null; then\n    echo \"[vault-ensure-kv-secrets] installing via yum ...\"\n    yum install -y postgresql\n  elif command -v dnf 1>/dev/null 2>/dev/null; then\n    echo \"[vault-ensure-kv-secrets] installing via dnf ...\"\n    dnf install -y postgresql\n  elif command -v microdnf 1>/dev/null 2>/dev/null; then\n    echo \"[vault-ensure-kv-secrets] installing via microdnf ...\"\n    microdnf install -y postgresql\n  else\n    echo \"[vault-ensure-kv-secrets] No supported package manager found. Falling back to pure-Python pg8000.\"\n    USE_PYPG=1\n  fi\n\n  if [ \"$USE_PYPG\" -eq 0 ] && ! command -v psql 1>/dev/null 2>/dev/null; then\n    echo \"[vault-ensure-kv-secrets] WARNING: psql install path did not yield psql. Falling back to pure-Python pg8000.\"\n    USE_PYPG=1\n  fi\nfi\n\n# If using python fallback, ensure pg8000 is available (pure python, no system libpq needed)\nif [ \"$USE_PYPG\" -eq 1 ]; then\n  echo \"[vault-ensure-kv-secrets] ensuring python driver pg8000 is available ...\"\n  python3 -m pip install --no-cache-dir -q pg8000\nfi\n\n# ------------------------------------------------------------\n# Wait for Key Vault RBAC/permissions to become effective\n# ------------------------------------------------------------\necho \"[vault-ensure-kv-secrets] waiting for Key Vault permissions...\"\nfor i in $(seq 1 30); do\n  if az keyvault secret list --vault-name \"$KEYVAULT_NAME\" --maxresults 1 1>/dev/null 2>/dev/null; then\n    echo \"[vault-ensure-kv-secrets] Key Vault access OK\"\n    break\n  fi\n  echo \"[vault-ensure-kv-secrets] Key Vault access not ready yet ($i/30), sleeping 10s...\"\n  sleep 10\n  if [ \"$i\" -eq 30 ]; then\n    echo \"[vault-ensure-kv-secrets] ERROR: Key Vault permissions not ready after 300s\"\n    exit 1\n  fi\ndone\n\n# ------------------------------------------------------------\n# Wait for PostgreSQL to accept connections\n# ------------------------------------------------------------\necho \"[vault-ensure-kv-secrets] waiting for PostgreSQL connectivity...\"\nexport PGPASSWORD=\"${DB_ADMIN_PASSWORD}\"\n\nif [ \"$USE_PYPG\" -eq 0 ]; then\n  PG_CONN_ADMIN=\"host=${POSTGRES_FQDN} port=${POSTGRES_PORT} dbname=postgres user=${DB_ADMIN_USER} sslmode=${TLS_SSLMODE}\"\n  for i in $(seq 1 30); do\n    if psql \"${PG_CONN_ADMIN}\" -v ON_ERROR_STOP=1 -c \"SELECT 1\" 1>/dev/null 2>/dev/null; then\n      echo \"[vault-ensure-kv-secrets] PostgreSQL reachable\"\n      break\n    fi\n    echo \"[vault-ensure-kv-secrets] PostgreSQL not ready yet ($i/30), sleeping 10s...\"\n    sleep 10\n    if [ \"$i\" -eq 30 ]; then\n      echo \"[vault-ensure-kv-secrets] ERROR: PostgreSQL not reachable after 300s\"\n      exit 1\n    fi\n  done\nelse\n  python3 - <<'PY'\nimport os, time, ssl\nimport pg8000\n\nhost=os.environ[\"POSTGRES_FQDN\"]\nport=int(os.environ.get(\"POSTGRES_PORT\",\"5432\"))\nuser=os.environ[\"DB_ADMIN_USER\"]\npw=os.environ[\"DB_ADMIN_PASSWORD\"]\ndb=\"postgres\"\n\n# Match \"sslmode=require\" semantics: encryption without hostname / chain validation\nctx=ssl.create_default_context()\nctx.check_hostname=False\nctx.verify_mode=ssl.CERT_NONE\n\nfor i in range(30):\n  try:\n    conn=pg8000.connect(host=host, port=port, user=user, password=pw, database=db, ssl_context=ctx, timeout=10)\n    conn.autocommit=True\n    cur=conn.cursor()\n    cur.execute(\"SELECT 1\")\n    cur.close()\n    conn.close()\n    print(\"[vault-ensure-kv-secrets] PostgreSQL reachable\")\n    break\n  except Exception as e:\n    print(f\"[vault-ensure-kv-secrets] PostgreSQL not ready yet ({i+1}/30): {e}\")\n    time.sleep(10)\nelse:\n  raise SystemExit(\"[vault-ensure-kv-secrets] ERROR: PostgreSQL not reachable after 300s\")\nPY\nfi\n\n# ------------------------------------------------------------\n# Secrets in Key Vault\n# ------------------------------------------------------------\n\n# --- ADMIN_TOKEN ---\nif az keyvault secret show --vault-name \"$KEYVAULT_NAME\" --name \"$ADMIN_TOKEN_SECRET\" 1>/dev/null 2>/dev/null; then\n  echo \"ADMIN_TOKEN secret already exists.\"\nelse\n  echo \"Creating ADMIN_TOKEN secret...\"\n  ADMIN_TOKEN=$(python3 - << 'PY'\nimport secrets, base64\nprint(base64.urlsafe_b64encode(secrets.token_bytes(48)).decode('utf-8').rstrip('='))\nPY\n)\n  az keyvault secret set --vault-name \"$KEYVAULT_NAME\" --name \"$ADMIN_TOKEN_SECRET\" --value \"$ADMIN_TOKEN\" 1>/dev/null\n  echo \"ADMIN_TOKEN secret created.\"\nfi\n\n# --- SMTP password ---\nif [ \"${SMTP_USE_AUTH:-false}\" = \"true\" ]; then\n  if az keyvault secret show --vault-name \"$KEYVAULT_NAME\" --name \"$SMTP_PASSWORD_SECRET\" 1>/dev/null 2>/dev/null; then\n    echo \"SMTP password secret already exists.\"\n  else\n    echo \"Creating SMTP password secret...\"\n    az keyvault secret set --vault-name \"$KEYVAULT_NAME\" --name \"$SMTP_PASSWORD_SECRET\" --value \"$SMTP_PASSWORD_VALUE\" 1>/dev/null\n    echo \"SMTP password secret created.\"\n  fi\nelse\n  echo \"SMTP auth disabled (Direct Send). Skipping SMTP password secret.\"\nfi\n\n# --- App DB password (least-privilege user for Vaultwarden) ---\nif az keyvault secret show --vault-name \"$KEYVAULT_NAME\" --name \"$DB_APP_PASSWORD_SECRET\" 1>/dev/null 2>/dev/null; then\n  echo \"App DB password secret already exists.\"\n  DB_APP_PASSWORD=$(az keyvault secret show --vault-name \"$KEYVAULT_NAME\" --name \"$DB_APP_PASSWORD_SECRET\" --query value -o tsv)\nelse\n  echo \"Creating App DB password secret...\"\n  DB_APP_PASSWORD=$(python3 - << 'PY'\nimport secrets\nprint(secrets.token_urlsafe(32))  # safe chars for SQL + URL encoding later\nPY\n)\n  az keyvault secret set --vault-name \"$KEYVAULT_NAME\" --name \"$DB_APP_PASSWORD_SECRET\" --value \"$DB_APP_PASSWORD\" 1>/dev/null\n  echo \"App DB password secret created.\"\nfi\n\nexport DB_APP_PASSWORD=\"$DB_APP_PASSWORD\"\n\n# ------------------------------------------------------------\n# Provision least-privilege role & grants (idempotent)\n# ------------------------------------------------------------\necho \"Provisioning Postgres role '$DB_APP_USER' and database privileges (idempotent) ...\"\n\nif [ \"$USE_PYPG\" -eq 0 ]; then\n  PG_CONN_ADMIN=\"host=${POSTGRES_FQDN} port=${POSTGRES_PORT} dbname=postgres user=${DB_ADMIN_USER} sslmode=${TLS_SSLMODE}\"\n  psql \"${PG_CONN_ADMIN}\" -v ON_ERROR_STOP=1 <<SQL 1>/dev/null\nDO \\$\\$\nBEGIN\n  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${DB_APP_USER}') THEN\n    CREATE ROLE \"${DB_APP_USER}\" LOGIN PASSWORD '${DB_APP_PASSWORD}';\n  END IF;\nEND\n\\$\\$;\n\nALTER ROLE \"${DB_APP_USER}\"\n  WITH LOGIN PASSWORD '${DB_APP_PASSWORD}'\n  NOCREATEDB NOCREATEROLE NOINHERIT;\n\nGRANT CONNECT ON DATABASE \"${POSTGRES_DBNAME}\" TO \"${DB_APP_USER}\";\nSQL\n\n  PG_CONN_VWDB=\"host=${POSTGRES_FQDN} port=${POSTGRES_PORT} dbname=${POSTGRES_DBNAME} user=${DB_ADMIN_USER} sslmode=${TLS_SSLMODE}\"\n  psql \"${PG_CONN_VWDB}\" -v ON_ERROR_STOP=1 <<SQL 1>/dev/null\nGRANT USAGE, CREATE ON SCHEMA public TO \"${DB_APP_USER}\";\nSQL\nelse\n  python3 - <<'PY'\nimport os, ssl\nimport pg8000\n\nhost=os.environ[\"POSTGRES_FQDN\"]\nport=int(os.environ.get(\"POSTGRES_PORT\",\"5432\"))\nadmin_user=os.environ[\"DB_ADMIN_USER\"]\nadmin_pw=os.environ[\"DB_ADMIN_PASSWORD\"]\ndb_name=os.environ[\"POSTGRES_DBNAME\"]\napp_user=os.environ[\"DB_APP_USER\"]\napp_pw=os.environ[\"DB_APP_PASSWORD\"]\n\nctx=ssl.create_default_context()\nctx.check_hostname=False\nctx.verify_mode=ssl.CERT_NONE\n\ndef run(database, sql):\n  conn=pg8000.connect(host=host, port=port, user=admin_user, password=admin_pw, database=database, ssl_context=ctx, timeout=20)\n  conn.autocommit=True\n  cur=conn.cursor()\n  cur.execute(sql)\n  cur.close()\n  conn.close()\n\nsql_admin = (\n  \"DO $$\\n\"\n  \"BEGIN\\n\"\n  f\"  IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '{app_user}') THEN\\n\"\n  f\"    CREATE ROLE \\\"{app_user}\\\" LOGIN PASSWORD '{app_pw}';\\n\"\n  \"  END IF;\\n\"\n  \"END\\n\"\n  \"$$;\\n\\n\"\n  f\"ALTER ROLE \\\"{app_user}\\\" WITH LOGIN PASSWORD '{app_pw}' NOCREATEDB NOCREATEROLE NOINHERIT;\\n\"\n  f\"GRANT CONNECT ON DATABASE \\\"{db_name}\\\" TO \\\"{app_user}\\\";\\n\"\n)\n\nrun(\"postgres\", sql_admin)\nrun(db_name, f\"GRANT USAGE, CREATE ON SCHEMA public TO \\\"{app_user}\\\";\")\n\nprint(\"Postgres provisioning done.\")\nPY\nfi\n\n# ------------------------------------------------------------\n# DATABASE_URL (PostgreSQL connection string for Vaultwarden)\n# ------------------------------------------------------------\nENCODED_APP_PASSWORD=$(python3 - << 'PY'\nimport os, urllib.parse\nprint(urllib.parse.quote(os.environ.get(\"DB_APP_PASSWORD\",\"\"), safe=\"\"))\nPY\n)\n\nDATABASE_URL=\"postgresql://${DB_APP_USER}:${ENCODED_APP_PASSWORD}@${POSTGRES_FQDN}:${POSTGRES_PORT}/${POSTGRES_DBNAME}?sslmode=${TLS_SSLMODE}\"\n\nif az keyvault secret show --vault-name \"$KEYVAULT_NAME\" --name \"$DATABASE_URL_SECRET\" 1>/dev/null 2>/dev/null; then\n  CURRENT_DBURL=$(az keyvault secret show --vault-name \"$KEYVAULT_NAME\" --name \"$DATABASE_URL_SECRET\" --query value -o tsv || echo \"\")\n  if echo \"$CURRENT_DBURL\" | grep -qiE '^postgres(ql)?://'; then\n    if echo \"$CURRENT_DBURL\" | grep -q \"://${DB_ADMIN_USER}:\"; then\n      echo \"DATABASE_URL currently uses admin user; updating to app user...\"\n      az keyvault secret set --vault-name \"$KEYVAULT_NAME\" --name \"$DATABASE_URL_SECRET\" --value \"$DATABASE_URL\" 1>/dev/null\n      echo \"DATABASE_URL secret updated.\"\n    else\n      echo \"DATABASE_URL secret already exists and looks valid.\"\n    fi\n  else\n    echo \"DATABASE_URL secret exists but looks invalid; updating to PostgreSQL URL...\"\n    az keyvault secret set --vault-name \"$KEYVAULT_NAME\" --name \"$DATABASE_URL_SECRET\" --value \"$DATABASE_URL\" 1>/dev/null\n    echo \"DATABASE_URL secret updated.\"\n  fi\nelse\n  echo \"Creating DATABASE_URL secret...\"\n  az keyvault secret set --vault-name \"$KEYVAULT_NAME\" --name \"$DATABASE_URL_SECRET\" --value \"$DATABASE_URL\" 1>/dev/null\n  echo \"DATABASE_URL secret created.\"\nfi\n\n# Non-sensitive output (for troubleshooting/visibility)\n\n# ------------------------------------------------------------\n# SMTP host resolution (Direct Send without auth)\n# ------------------------------------------------------------\nMX_HOST=\"\"\nif [ \"${SMTP_USE_AUTH:-false}\" = \"true\" ]; then\n  MX_HOST=\"${SMTP_HOST_INPUT:-}\"\nelse\n  if [ -n \"${SMTP_HOST_INPUT:-}\" ]; then\n    MX_HOST=\"$SMTP_HOST_INPUT\"\n  else\n    if [ -z \"${CUSTOMER_MAIL_DOMAIN:-}\" ]; then\n      echo \"[vault-ensure-kv-secrets] ERROR: CUSTOMER_MAIL_DOMAIN is required for Direct Send when SMTP_HOST is empty\"\n      exit 1\n    fi\n    echo \"[vault-ensure-kv-secrets] Resolving MX for ${CUSTOMER_MAIL_DOMAIN} ...\"\n    python3 -m pip install --no-cache-dir -q dnspython\n    MX_HOST=$(python3 - <<'PY'\nimport os\nimport dns.resolver\ndomain=os.environ[\"CUSTOMER_MAIL_DOMAIN\"]\nanswers=dns.resolver.resolve(domain, \"MX\")\nmx=sorted([(r.preference, str(r.exchange).rstrip(\".\")) for r in answers])[0][1]\nprint(mx)\nPY\n)\n  fi\nfi\necho \"[vault-ensure-kv-secrets] SMTP host resolved: ${MX_HOST}\"\n\ncat > \"$AZ_SCRIPTS_OUTPUT_PATH\" <<JSON\n{\n  \"status\": \"ok\",\n  \"smtp_host\": \"${MX_HOST}\"\n}\nJSON\n\necho \"Done.\"\n"
       },
       "dependsOn": [
         "[resourceId('Microsoft.KeyVault/vaults', variables('keyVaultName'))]",
@@ -518,23 +680,7 @@
             "targetPort": 80,
             "allowInsecure": "[parameters('allowInsecureHttp')]"
           },
-          "secrets": [
-            {
-              "name": "admin-token",
-              "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-id', parameters('appName')))]",
-              "keyVaultUrl": "[format('https://{0}.vault.azure.net/secrets/{1}', variables('keyVaultName'), variables('kvSecretAdminTokenName'))]"
-            },
-            {
-              "name": "smtp-password",
-              "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-id', parameters('appName')))]",
-              "keyVaultUrl": "[format('https://{0}.vault.azure.net/secrets/{1}', variables('keyVaultName'), variables('kvSecretSmtpPasswordName'))]"
-            },
-            {
-              "name": "database-url",
-              "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-id', parameters('appName')))]",
-              "keyVaultUrl": "[format('https://{0}.vault.azure.net/secrets/{1}', variables('keyVaultName'), variables('kvSecretDatabaseUrlName'))]"
-            }
-          ],
+          "secrets": "[concat(variables('vwSecretsBase'), if(parameters('smtpUseAuth'), variables('vwSecretsSmtp'), json('[]')))]",
           "activeRevisionsMode": "Single"
         },
         "template": {
@@ -546,72 +692,7 @@
                 "cpu": "[json(parameters('cpuCores'))]",
                 "memory": "[format('{0}Gi', parameters('memorySize'))]"
               },
-              "env": [
-                {
-                  "name": "ADMIN_TOKEN",
-                  "secretRef": "admin-token"
-                },
-                {
-                  "name": "DATABASE_URL",
-                  "secretRef": "database-url"
-                },
-                {
-                  "name": "DOMAIN",
-                  "value": "[parameters('domainUrl')]"
-                },
-                {
-                  "name": "EMAIL_2FA_AUTO_FALLBACK",
-                  "value": "false"
-                },
-                {
-                  "name": "HTTP_REQUEST_BLOCK_NON_GLOBAL_IPS",
-                  "value": "true"
-                },
-                {
-                  "name": "INVITATIONS_ALLOWED",
-                  "value": "true"
-                },
-                {
-                  "name": "INVITATION_ORG_NAME",
-                  "value": "[parameters('invitationOrgName')]"
-                },
-                {
-                  "name": "SHOW_PASSWORD_HINT",
-                  "value": "false"
-                },
-                {
-                  "name": "SIGNUPS_ALLOWED",
-                  "value": "false"
-                },
-                {
-                  "name": "SIGNUPS_DOMAINS_WHITELIST",
-                  "value": "[parameters('signupsDomainsWhitelist')]"
-                },
-                {
-                  "name": "SMTP_FROM",
-                  "value": "[parameters('smtpFrom')]"
-                },
-                {
-                  "name": "SMTP_HOST",
-                  "value": "[parameters('smtpHost')]"
-                },
-                {
-                  "name": "SMTP_PASSWORD",
-                  "secretRef": "smtp-password"
-                },
-                {
-                  "name": "SMTP_PORT",
-                  "value": "[parameters('smtpPort')]"
-                },
-                {
-                  "name": "SMTP_SECURITY",
-                  "value": "[parameters('smtpSecurity')]"
-                },
-                {
-                  "name": "SMTP_USERNAME",
-                  "value": "[parameters('smtpUsername')]"
-                }
-              ],
+              "env": "[concat(variables('vwEnvBase'), variables('vwEnvSmtpCommon'), if(parameters('smtpUseAuth'), concat(variables('vwEnvSmtpAuthCore'), if(empty(parameters('smtpAuthMechanism')), json('[]'), createArray(createObject('name','SMTP_AUTH_MECHANISM','value',parameters('smtpAuthMechanism'))))), json('[]')))]",
               "volumeMounts": [
                 {
                   "volumeName": "data",

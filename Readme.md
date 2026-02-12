@@ -30,6 +30,51 @@ The deployment supports **backup & restore** scenarios and **safe container upda
 
 ---
 
+## SMTP Modus: Direct Send (Default) vs. SMTP Auth
+
+Das Template unterstützt zwei Betriebsarten:
+
+### A) Direct Send (Default, **nur intern** im Microsoft 365 Tenant)
+
+- **Default:** `smtpUseAuth = false`
+- Es werden **keine** Env-Variablen/Secrets für `SMTP_USERNAME`, `SMTP_PASSWORD` oder `SMTP_AUTH_MECHANISM` angelegt.
+- `SMTP_HOST` wird **automatisch** via MX-Lookup aus `customerMailDomain` ermittelt (optional übersteuerbar über `smtpHostDirectSend`).
+
+**Erforderliche Parameter:**
+- `customerMailDomain = kundendomain.tld` (Pflicht, für MX-Lookup)
+- `smtpFromLocalPart` (Default: `vault`)
+- Optional: `smtpFromName`, `heloName`
+
+**Wichtig:** Direct Send ist für **interne Empfänger** gedacht (User/Postfächer/Shared Mailboxes im gleichen Tenant).
+Wenn du an **externe** Empfänger senden willst oder SPF/DMARC sauber über M365 laufen soll, nutze Modus B (SMTP Auth).
+
+### B) SMTP Auth (optional, auch für extern)
+
+- `smtpUseAuth = true`
+- `smtpHost = smtp.office365.com` (Default)
+- `smtpPort = 587` (Default)
+- `smtpUsername` + `smtpPassword` sind Pflicht
+- Optional: `smtpAuthMechanism`, `smtpFromName`, `heloName`
+
+---
+
+## Manueller Schritt (Direct Send): Absender-Adresse/Shared Mailbox
+
+Die Anlage eines (freigegebenen) Postfachs wird **nicht** automatisch im Deployment gemacht (bewusst: Tenant-Admin-Rechte, Governance, Wunsch nach Trennung IaC/Identity).
+
+Empfehlung: Lege ein freigegebenes Postfach an, z. B. `vault@kundendomain.tld`, und verwende es als Absender:
+
+- `smtpFromLocalPart = vault`
+- `customerMailDomain = kundendomain.tld`
+
+Beispiel (Exchange Online PowerShell):
+
+```powershell
+New-Mailbox -Shared -Name "Vaultwarden" -Alias "vault" -PrimarySmtpAddress "vault@kundendomain.tld"
+```
+
+---
+
 ## Deployment
 
 ### 1. Click **Deploy to Azure**
@@ -43,8 +88,8 @@ If you prefer a scripted deployment (e.g., for repeatability), use:
 ```powershell
 ./scripts/deploy.ps1 -ResourceGroupName <RG-NAME> -Environment prod \
   -DomainUrl https://vault.example.com \
-  -SmtpFrom vault@example.com \
-  -SmtpUsername vault@example.com
+  -SmtpUseAuth:$false \
+  -CustomerMailDomain kunde.tld
 ```
 
 > Tip: `./deploy.ps1` exists as a small forwarder and simply calls `./scripts/deploy.ps1`.

@@ -6,10 +6,48 @@ param(
   [Parameter(Mandatory=$false)]
   [string]$DomainUrl,
 
-  # SMTP settings (required by the template)
+  # SMTP mode
+  # - $false (Default): Direct Send ohne Auth (Port 25, STARTTLS, MX Lookup im Template)
+  # - $true: SMTP Submission mit Auth (z.B. smtp.office365.com:587)
+  [Parameter(Mandatory=$false)]
+  [bool]$SmtpUseAuth = $false,
+
+  # Für Direct Send: Mail-Domain (MX Lookup), z.B. kunde.tld
+  [Parameter(Mandatory=$false)]
+  [string]$CustomerMailDomain,
+
+  # Optional: Absender-Override. Leer lassen = Template nutzt "$SmtpFromLocalPart@$CustomerMailDomain"
   [Parameter(Mandatory=$false)]
   [string]$SmtpFrom,
 
+  [Parameter(Mandatory=$false)]
+  [string]$SmtpFromLocalPart = "vault",
+
+  [Parameter(Mandatory=$false)]
+  [string]$SmtpFromName = "Vaultwarden",
+
+  # Optional: HELO/EHLO Name. Leer lassen = Hostname aus DomainUrl wird verwendet.
+  [Parameter(Mandatory=$false)]
+  [string]$HeloName,
+
+  # Optional: SMTP Auth Mechanism (nur bei Auth), z.B. "Login" / "Plain" / "Xoauth2"
+  [Parameter(Mandatory=$false)]
+  [string]$SmtpAuthMechanism,
+
+  # Optional: SMTP Host Override
+  # - Auth-Mode: smtpHost (z.B. smtp.office365.com)
+  # - Direct Send: smtpHostDirectSend (MX Endpoint). Leer lassen = MX Lookup.
+  [Parameter(Mandatory=$false)]
+  [string]$SmtpHost,
+
+  [Parameter(Mandatory=$false)]
+  [int]$SmtpPort,
+
+  [Parameter(Mandatory=$false)]
+  [ValidateSet("starttls","force_tls","off")]
+  [string]$SmtpSecurity,
+
+  # SMTP Auth (nur bei $SmtpUseAuth = $true)
   [Parameter(Mandatory=$false)]
   [string]$SmtpUsername,
 
@@ -38,27 +76,47 @@ if ([string]::IsNullOrWhiteSpace($BsseRef)) {
   }
 }
 
-if ([string]::IsNullOrWhiteSpace($BsseRef)) {
-  # Fallback – Template selbst versucht zusätzlich aus templateLink zu lesen
-  $BsseRef = ""
-}
-
 Write-Host "Deploying with tags: Environment=$Environment, bsse:ref=$BsseRef"
+Write-Host "SMTP mode: " -NoNewline
+if ($SmtpUseAuth) { Write-Host "AUTH" } else { Write-Host "DIRECT SEND (no-auth)" }
 
 if ([string]::IsNullOrWhiteSpace($DomainUrl)) {
   $DomainUrl = Read-Host "Domain URL (e.g. https://vault.example.com)"
 }
 
-if ([string]::IsNullOrWhiteSpace($SmtpFrom)) {
-  $SmtpFrom = Read-Host "SMTP From (e.g. vault@yourdomain.tld)"
+# --- SMTP Eingaben abhängig vom Modus ---
+if (-not $SmtpUseAuth) {
+  if ([string]::IsNullOrWhiteSpace($CustomerMailDomain)) {
+    $CustomerMailDomain = Read-Host "Customer Mail Domain for Direct Send (e.g. kunde.tld)"
+  }
+  # SmtpFrom ist optional – Template leitet sonst vault@kunde.tld ab
+  if ([string]::IsNullOrWhiteSpace($SmtpFrom)) {
+    $SmtpFrom = ""
+  }
+  if ([string]::IsNullOrWhiteSpace($SmtpHost)) {
+    $SmtpHost = "" # Template macht MX Lookup, wenn Host leer
+  }
 }
-
-if ([string]::IsNullOrWhiteSpace($SmtpUsername)) {
-  $SmtpUsername = Read-Host "SMTP Username"
-}
-
-if (-not $SmtpPassword) {
-  $SmtpPassword = Read-Host "SMTP Password" -AsSecureString
+else {
+  # Auth-Mode: SMTP Host/Port/Security können optional übergeben werden
+  if ([string]::IsNullOrWhiteSpace($SmtpHost)) {
+    $SmtpHost = Read-Host "SMTP Host (e.g. smtp.office365.com)"
+  }
+  if (-not $SmtpPort) {
+    $SmtpPort = [int](Read-Host "SMTP Port (e.g. 587)")
+  }
+  if ([string]::IsNullOrWhiteSpace($SmtpSecurity)) {
+    $SmtpSecurity = Read-Host "SMTP Security (starttls|force_tls|off)"
+  }
+  if ([string]::IsNullOrWhiteSpace($SmtpFrom)) {
+    $SmtpFrom = Read-Host "SMTP From (e.g. vault@yourdomain.tld)"
+  }
+  if ([string]::IsNullOrWhiteSpace($SmtpUsername)) {
+    $SmtpUsername = Read-Host "SMTP Username"
+  }
+  if (-not $SmtpPassword) {
+    $SmtpPassword = Read-Host "SMTP Password" -AsSecureString
+  }
 }
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
@@ -72,14 +130,6 @@ $smtpPasswordPlain = $null
 $paramFile = Join-Path ([System.IO.Path]::GetTempPath()) ("vaultwarden.parameters.{0}.json" -f ([System.Guid]::NewGuid().ToString("N")))
 
 try {
-  # Convert securestring to plain only for the temporary parameters file (file will be deleted).
-  $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($SmtpPassword)
-  try {
-    $smtpPasswordPlain = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
-  } finally {
-    [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
-  }
-
   $params = @{
     '$schema' = 'https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#'
     contentVersion = '1.0.0.0'
@@ -87,13 +137,41 @@ try {
       environment = @{ value = $Environment }
       bsseRef     = @{ value = $BsseRef }
       domainUrl   = @{ value = $DomainUrl }
-      smtpFrom    = @{ value = $SmtpFrom }
-      smtpUsername= @{ value = $SmtpUsername }
-      smtpPassword= @{ value = $smtpPasswordPlain }
+      smtpUseAuth = @{ value = $SmtpUseAuth }
+      customerMailDomain = @{ value = $CustomerMailDomain }
+      smtpFromLocalPart  = @{ value = $SmtpFromLocalPart }
+      smtpFromName       = @{ value = $SmtpFromName }
+      heloName           = @{ value = $HeloName }
+      smtpAuthMechanism  = @{ value = $SmtpAuthMechanism }
+      smtpFrom           = @{ value = $SmtpFrom }
+      # smtpHost / smtpHostDirectSend werden je nach Modus gesetzt
+      smtpPort           = @{ value = $SmtpPort }
+      smtpSecurity       = @{ value = $SmtpSecurity }
+      smtpUsername       = @{ value = $SmtpUsername }
+      # smtpPassword wird nur gesetzt, wenn Auth-Mode aktiv ist
     }
   }
 
-  $params | ConvertTo-Json -Depth 10 | Set-Content -Path $paramFile -Encoding UTF8
+  if ($SmtpUseAuth) {
+    $params.parameters.smtpHost = @{ value = $SmtpHost }
+  }
+  else {
+    # Direct Send: Host optional übersteuerbar. Leer = MX Lookup.
+    $params.parameters.smtpHostDirectSend = @{ value = $SmtpHost }
+  }
+
+  if ($SmtpUseAuth -and $SmtpPassword) {
+    # Convert securestring to plain only for the temporary parameters file (file will be deleted).
+    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($SmtpPassword)
+    try {
+      $smtpPasswordPlain = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+    } finally {
+      [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    }
+    $params.parameters.smtpPassword = @{ value = $smtpPasswordPlain }
+  }
+
+  $params | ConvertTo-Json -Depth 15 | Set-Content -Path $paramFile -Encoding UTF8
 
   az deployment group create `
     --resource-group $ResourceGroupName `
