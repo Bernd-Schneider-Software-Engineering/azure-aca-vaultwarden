@@ -219,7 +219,7 @@
       "type": "string",
       "defaultValue": "",
       "metadata": {
-        "description": "Optional (nur SMTP Auth): SMTP Auth Mechanism. Mögliche Werte u.a.: Plain, Login, Xoauth2 (auch kommasepariert)."
+        "description": "Optional (nur SMTP Auth): SMTP Auth Mechanism. M\u00f6gliche Werte u.a.: Plain, Login, Xoauth2 (auch kommasepariert)."
       },
       "allowedValues": [
         "",
@@ -229,6 +229,52 @@
         "Plain,Login",
         "Login,Plain"
       ]
+    },
+    "azureFilesBackupEnabled": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Enable Azure Backup for the Azure File Share used by Vaultwarden (/data)."
+      }
+    },
+    "azureFilesBackupScheduleRunTime": {
+      "type": "string",
+      "defaultValue": "05:30",
+      "metadata": {
+        "description": "Time of day (HH:MM) when backup should run. MM must be 00 or 30."
+      }
+    },
+    "azureFilesBackupTimeZone": {
+      "type": "string",
+      "defaultValue": "UTC",
+      "metadata": {
+        "description": "Windows timezone name for the backup schedule, e.g. UTC, W. Europe Standard Time."
+      }
+    },
+    "azureFilesBackupDailyRetentionDays": {
+      "type": "int",
+      "defaultValue": 30,
+      "metadata": {
+        "description": "Number of days to retain daily Azure Files backups."
+      }
+    },
+    "azureFilesBackupWeeklyDaysOfWeek": {
+      "type": "array",
+      "defaultValue": [
+        "Sunday",
+        "Tuesday",
+        "Thursday"
+      ],
+      "metadata": {
+        "description": "Days of week used for weekly retention points."
+      }
+    },
+    "azureFilesBackupWeeklyRetentionWeeks": {
+      "type": "int",
+      "defaultValue": 12,
+      "metadata": {
+        "description": "Number of weeks to retain weekly Azure Files backups."
+      }
     }
   },
   "variables": {
@@ -352,7 +398,18 @@
         "keyVaultUrl": "[format('https://{0}.vault.azure.net/secrets/{1}', variables('keyVaultName'), variables('kvSecretSmtpPasswordName'))]",
         "identity": "[resourceId('Microsoft.ManagedIdentity/userAssignedIdentities', format('{0}-id', parameters('appName')))]"
       }
-    ]
+    ],
+    "recoveryServicesVaultName": "[format('{0}-rsv', variables('namePrefix'))]",
+    "azureFilesBackupFabric": "Azure",
+    "azureFilesBackupManagementType": "AzureStorage",
+    "azureFilesBackupPolicyName": "[format('{0}-afiles-daily', variables('namePrefix'))]",
+    "azureFilesBackupScheduleRunTimes": [
+      "[format('2020-01-01T{0}:00Z', parameters('azureFilesBackupScheduleRunTime'))]"
+    ],
+    "azureFilesBackupTimeZone": "[parameters('azureFilesBackupTimeZone')]",
+    "azureFilesBackupDailyRetentionDurationCount": "[parameters('azureFilesBackupDailyRetentionDays')]",
+    "azureFilesBackupDaysOfTheWeek": "[parameters('azureFilesBackupWeeklyDaysOfWeek')]",
+    "azureFilesBackupWeeklyRetentionDurationCount": "[parameters('azureFilesBackupWeeklyRetentionWeeks')]"
   },
   "resources": [
     {
@@ -712,6 +769,88 @@
         "[resourceId('Microsoft.DBforPostgreSQL/flexibleServers/databases', variables('postgresServerName'), variables('postgresDbName'))]"
       ],
       "tags": "[variables('commonTags')]"
+    },
+    {
+      "type": "Microsoft.RecoveryServices/vaults",
+      "apiVersion": "2021-12-01",
+      "name": "[variables('recoveryServicesVaultName')]",
+      "location": "[parameters('location')]",
+      "sku": {
+        "name": "RS0",
+        "tier": "Standard"
+      },
+      "properties": {},
+      "condition": "[parameters('azureFilesBackupEnabled')]"
+    },
+    {
+      "type": "Microsoft.RecoveryServices/vaults/backupPolicies",
+      "apiVersion": "2021-12-01",
+      "name": "[format('{0}/{1}', variables('recoveryServicesVaultName'), variables('azureFilesBackupPolicyName'))]",
+      "properties": {
+        "backupManagementType": "[variables('azureFilesBackupManagementType')]",
+        "schedulePolicy": {
+          "scheduleRunFrequency": "Daily",
+          "scheduleRunTimes": "[variables('azureFilesBackupScheduleRunTimes')]",
+          "schedulePolicyType": "SimpleSchedulePolicy"
+        },
+        "retentionPolicy": {
+          "dailySchedule": {
+            "retentionTimes": "[variables('azureFilesBackupScheduleRunTimes')]",
+            "retentionDuration": {
+              "count": "[variables('azureFilesBackupDailyRetentionDurationCount')]",
+              "durationType": "Days"
+            }
+          },
+          "weeklySchedule": {
+            "daysOfTheWeek": "[variables('azureFilesBackupDaysOfTheWeek')]",
+            "retentionTimes": "[variables('azureFilesBackupScheduleRunTimes')]",
+            "retentionDuration": {
+              "count": "[variables('azureFilesBackupWeeklyRetentionDurationCount')]",
+              "durationType": "Weeks"
+            }
+          },
+          "retentionPolicyType": "LongTermRetentionPolicy"
+        },
+        "timeZone": "[variables('azureFilesBackupTimeZone')]",
+        "workLoadType": "AzureFileShare"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.RecoveryServices/vaults', variables('recoveryServicesVaultName'))]"
+      ],
+      "condition": "[parameters('azureFilesBackupEnabled')]"
+    },
+    {
+      "type": "Microsoft.RecoveryServices/vaults/backupFabrics/protectionContainers",
+      "apiVersion": "2021-12-01",
+      "name": "[format('{0}/{1}/storagecontainer;Storage;{2};{3}', variables('recoveryServicesVaultName'), variables('azureFilesBackupFabric'), resourceGroup().name, variables('storageAccountName'))]",
+      "properties": {
+        "backupManagementType": "[variables('azureFilesBackupManagementType')]",
+        "containerType": "StorageContainer",
+        "sourceResourceId": "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.RecoveryServices/vaults', variables('recoveryServicesVaultName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+      ],
+      "condition": "[parameters('azureFilesBackupEnabled')]"
+    },
+    {
+      "type": "Microsoft.RecoveryServices/vaults/backupFabrics/protectionContainers/protectedItems",
+      "apiVersion": "2021-12-01",
+      "name": "[format('{0}/{1}/{2}/{3}', split([format('{0}/{1}/storagecontainer;Storage;{2};{3}', variables('recoveryServicesVaultName'), variables('azureFilesBackupFabric'), resourceGroup().name, variables('storageAccountName'))], '/')[0], split([format('{0}/{1}/storagecontainer;Storage;{2};{3}', variables('recoveryServicesVaultName'), variables('azureFilesBackupFabric'), resourceGroup().name, variables('storageAccountName'))], '/')[1], split([format('{0}/{1}/storagecontainer;Storage;{2};{3}', variables('recoveryServicesVaultName'), variables('azureFilesBackupFabric'), resourceGroup().name, variables('storageAccountName'))], '/')[2], format('AzureFileShare;{0}', variables('fileShareName')))]",
+      "properties": {
+        "protectedItemType": "AzureFileShareProtectedItem",
+        "sourceResourceId": "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]",
+        "policyId": "[resourceId('Microsoft.RecoveryServices/vaults/backupPolicies', variables('recoveryServicesVaultName'), variables('azureFilesBackupPolicyName'))]",
+        "isInlineInquiry": true
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.RecoveryServices/vaults/backupPolicies', variables('recoveryServicesVaultName'), variables('azureFilesBackupPolicyName'))]",
+        "[resourceId('Microsoft.RecoveryServices/vaults/backupFabrics/protectionContainers', split([format('{0}/{1}/storagecontainer;Storage;{2};{3}', variables('recoveryServicesVaultName'), variables('azureFilesBackupFabric'), resourceGroup().name, variables('storageAccountName'))], '/')[0], split([format('{0}/{1}/storagecontainer;Storage;{2};{3}', variables('recoveryServicesVaultName'), variables('azureFilesBackupFabric'), resourceGroup().name, variables('storageAccountName'))], '/')[1], split([format('{0}/{1}/storagecontainer;Storage;{2};{3}', variables('recoveryServicesVaultName'), variables('azureFilesBackupFabric'), resourceGroup().name, variables('storageAccountName'))], '/')[2])]",
+        "[resourceId('Microsoft.RecoveryServices/vaults', variables('recoveryServicesVaultName'))]",
+        "[resourceId('Microsoft.Storage/storageAccounts/fileServices/shares', variables('storageAccountName'), 'default', variables('fileShareName'))]"
+      ],
+      "condition": "[parameters('azureFilesBackupEnabled')]"
     }
   ],
   "outputs": {

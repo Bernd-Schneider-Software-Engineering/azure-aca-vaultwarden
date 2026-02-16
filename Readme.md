@@ -29,6 +29,27 @@ This template deploys **Vaultwarden** as an **Azure Container App (Consumption)*
 The deployment supports **backup & restore** scenarios and **safe container updates** without data loss.
 
 ---
+## Azure Files Backup (IaC)
+
+Dieses Template kann **Azure Backup für Azure Files** für das Vaultwarden-`/data`-Share automatisch aktivieren.
+Dabei werden erstellt:
+
+- **Recovery Services Vault**
+- **Backup Policy** (AzureFileShare)
+- **Protection Container** + **Protected Item** für das File Share
+
+**Parameter (Defaults):**
+- `azureFilesBackupEnabled`: `true`
+- `azureFilesBackupScheduleRunTime`: `05:30` (HH:MM, Minuten 00 oder 30)
+- `azureFilesBackupTimeZone`: `UTC`
+- `azureFilesBackupDailyRetentionDays`: `30`
+- `azureFilesBackupWeeklyDaysOfWeek`: `Sunday, Tuesday, Thursday`
+- `azureFilesBackupWeeklyRetentionWeeks`: `12`
+
+Doku-Referenz: [Microsoft Learn Quickstart – Configure vaulted backup for Azure Files using ARM](https://learn.microsoft.com/en-us/azure/backup/quick-backup-azure-files-vault-tier-arm).
+
+---
+
 
 ## SMTP Modus: Direct Send (Default) vs. SMTP Auth
 
