@@ -503,10 +503,6 @@
         "value": "[if(empty(parameters('heloName')), variables('domainHostDefault'), parameters('heloName'))]"
       },
       {
-        "name": "SMTP_HOST",
-        "value": "[if(variables('useAcsSmtp'), 'smtp.azurecomm.net', if(parameters('smtpUseAuth'), if(empty(parameters('smtpHost')), 'smtp.office365.com', parameters('smtpHost')), reference(resourceId('Microsoft.Resources/deploymentScripts', variables('deploymentScriptName')), variables('deploymentScriptApiVersion')).outputs.smtp_host))]"
-      },
-      {
         "name": "SMTP_PORT",
         "value": "[if(variables('useAcsSmtp'), '587', if(parameters('smtpUseAuth'), string(parameters('smtpPort')), '25'))]"
       },
@@ -1093,7 +1089,7 @@
                 "cpu": "[json(parameters('cpuCores'))]",
                 "memory": "[format('{0}Gi', parameters('memorySize'))]"
               },
-              "env": "[concat(variables('vwEnvBase'), variables('vwEnvSmtpCommon'), if(parameters('smtpUseAuth'), variables('vwEnvSmtpAuthCore'), json('[]')), if(parameters('ssoEnabled'), variables('vwEnvSso'), json('[]')), if(parameters('pushEnabled'), variables('vwEnvPush'), json('[]')))]",
+              "env": "[concat(variables('vwEnvBase'), variables('vwEnvSmtpCommon'), createArray(createObject('name','SMTP_HOST','value', if(variables('useAcsSmtp'), 'smtp.azurecomm.net', if(parameters('smtpUseAuth'), if(empty(parameters('smtpHost')), 'smtp.office365.com', parameters('smtpHost')), reference(resourceId('Microsoft.Resources/deploymentScripts', variables('deploymentScriptName')), variables('deploymentScriptApiVersion')).outputs.smtp_host)))), if(parameters('smtpUseAuth'), variables('vwEnvSmtpAuthCore'), json('[]')), if(parameters('ssoEnabled'), variables('vwEnvSso'), json('[]')), if(parameters('pushEnabled'), variables('vwEnvPush'), json('[]')))]",
               "volumeMounts": [
                 {
                   "volumeName": "data",
