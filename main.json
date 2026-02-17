@@ -1220,7 +1220,7 @@
     {
       "type": "Microsoft.RecoveryServices/vaults/backupFabrics/protectionContainers/protectedItems",
       "apiVersion": "2021-12-01",
-      "name": "[format('{0}/{1}/{2}/{3}', split([format('{0}/{1}/storagecontainer;Storage;{2};{3}', variables('recoveryServicesVaultName'), variables('azureFilesBackupFabric'), resourceGroup().name, variables('storageAccountName'))], '/')[0], split([format('{0}/{1}/storagecontainer;Storage;{2};{3}', variables('recoveryServicesVaultName'), variables('azureFilesBackupFabric'), resourceGroup().name, variables('storageAccountName'))], '/')[1], split([format('{0}/{1}/storagecontainer;Storage;{2};{3}', variables('recoveryServicesVaultName'), variables('azureFilesBackupFabric'), resourceGroup().name, variables('storageAccountName'))], '/')[2], format('AzureFileShare;{0}', variables('fileShareName')))]",
+      "name": "[format('{0}/{1}/storagecontainer;Storage;{2};{3}/AzureFileShare;{4}', variables('recoveryServicesVaultName'), variables('azureFilesBackupFabric'), resourceGroup().name, variables('storageAccountName'), variables('fileShareName'))]",
       "properties": {
         "protectedItemType": "AzureFileShareProtectedItem",
         "sourceResourceId": "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]",
@@ -1229,7 +1229,7 @@
       },
       "dependsOn": [
         "[resourceId('Microsoft.RecoveryServices/vaults/backupPolicies', variables('recoveryServicesVaultName'), variables('azureFilesBackupPolicyName'))]",
-        "[resourceId('Microsoft.RecoveryServices/vaults/backupFabrics/protectionContainers', split([format('{0}/{1}/storagecontainer;Storage;{2};{3}', variables('recoveryServicesVaultName'), variables('azureFilesBackupFabric'), resourceGroup().name, variables('storageAccountName'))], '/')[0], split([format('{0}/{1}/storagecontainer;Storage;{2};{3}', variables('recoveryServicesVaultName'), variables('azureFilesBackupFabric'), resourceGroup().name, variables('storageAccountName'))], '/')[1], split([format('{0}/{1}/storagecontainer;Storage;{2};{3}', variables('recoveryServicesVaultName'), variables('azureFilesBackupFabric'), resourceGroup().name, variables('storageAccountName'))], '/')[2])]",
+        "[resourceId('Microsoft.RecoveryServices/vaults/backupFabrics/protectionContainers', variables('recoveryServicesVaultName'), variables('azureFilesBackupFabric'), format('storagecontainer;Storage;{0};{1}', resourceGroup().name, variables('storageAccountName')))]",
         "[resourceId('Microsoft.RecoveryServices/vaults', variables('recoveryServicesVaultName'))]",
         "[resourceId('Microsoft.Storage/storageAccounts/fileServices/shares', variables('storageAccountName'), 'default', variables('fileShareName'))]"
       ],
