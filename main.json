@@ -275,6 +275,63 @@
       "metadata": {
         "description": "Number of weeks to retain weekly Azure Files backups."
       }
+    },
+    "smtpAuthPreset": {
+      "type": "string",
+      "defaultValue": "custom",
+      "allowedValues": [
+        "custom",
+        "acsSmtp"
+      ],
+      "metadata": {
+        "description": "SMTP-Auth Preset. custom = nutze smtpHost/smtpPort/smtpSecurity wie angegeben. acsSmtp = nutze Azure Communication Services Email (SMTP) (Host/Port/Security werden automatisch gesetzt, ACS Ressourcen werden mitdeployt). Wirksam nur wenn smtpUseAuth=true."
+      }
+    },
+    "acsDataLocation": {
+      "type": "string",
+      "defaultValue": "Germany",
+      "metadata": {
+        "description": "ACS Data Location (z.B. Germany, Europe, UnitedStates). Nur relevant f\u00fcr smtpAuthPreset=acsSmtp."
+      }
+    },
+    "acsDomainName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Domain, die in ACS Email verifiziert werden soll (z.B. domain.tld). Leer = versucht domainRootDefault aus domainUrl zu verwenden. Nur relevant f\u00fcr smtpAuthPreset=acsSmtp."
+      }
+    },
+    "acsDomainManagement": {
+      "type": "string",
+      "defaultValue": "CustomerManaged",
+      "allowedValues": [
+        "CustomerManaged",
+        "CustomerManagedInExchangeOnline"
+      ],
+      "metadata": {
+        "description": "ACS Email Domain Management. CustomerManaged (DNS Records manuell setzen) oder CustomerManagedInExchangeOnline (wenn Exchange Online genutzt wird). Nur relevant f\u00fcr smtpAuthPreset=acsSmtp."
+      }
+    },
+    "acsEntraApplicationId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Entra ID Application (Client) ID der App Registration, die f\u00fcr ACS SMTP verwendet wird. Nur relevant f\u00fcr smtpAuthPreset=acsSmtp."
+      }
+    },
+    "acsEntraTenantId": {
+      "type": "string",
+      "defaultValue": "[subscription().tenantId]",
+      "metadata": {
+        "description": "Entra Tenant ID. Standard = subscription().tenantId. Nur relevant f\u00fcr smtpAuthPreset=acsSmtp."
+      }
+    },
+    "acsEntraServicePrincipalObjectId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Object ID des Service Principals der obigen Entra App (wird f\u00fcr RBAC Role Assignment auf dem ACS Communication Service genutzt). Nur relevant f\u00fcr smtpAuthPreset=acsSmtp."
+      }
     }
   },
   "variables": {
@@ -359,15 +416,15 @@
       },
       {
         "name": "SMTP_HOST",
-        "value": "[if(parameters('smtpUseAuth'), if(empty(parameters('smtpHost')),'smtp.office365.com',parameters('smtpHost')), reference(resourceId('Microsoft.Resources/deploymentScripts', format('{0}-ensure-kv-secrets', parameters('appName'))), '2023-08-01').outputs.smtp_host)]"
+        "value": "[if(variables('useAcsSmtp'), 'smtp.azurecomm.net', if(parameters('smtpUseAuth'), if(empty(parameters('smtpHost')), 'smtp.office365.com', parameters('smtpHost')), reference(resourceId('Microsoft.Resources/deploymentScripts', variables('deploymentScriptName')), variables('deploymentScriptApiVersion')).outputs.smtp_host))]"
       },
       {
         "name": "SMTP_PORT",
-        "value": "[if(parameters('smtpUseAuth'), string(parameters('smtpPort')), '25')]"
+        "value": "[if(variables('useAcsSmtp'), '587', if(parameters('smtpUseAuth'), string(parameters('smtpPort')), '25'))]"
       },
       {
         "name": "SMTP_SECURITY",
-        "value": "[if(parameters('smtpUseAuth'), parameters('smtpSecurity'), 'starttls')]"
+        "value": "[if(variables('useAcsSmtp'), 'starttls', if(parameters('smtpUseAuth'), parameters('smtpSecurity'), 'starttls'))]"
       }
     ],
     "vwEnvSmtpAuthCore": [
@@ -409,7 +466,18 @@
     "azureFilesBackupTimeZone": "[parameters('azureFilesBackupTimeZone')]",
     "azureFilesBackupDailyRetentionDurationCount": "[parameters('azureFilesBackupDailyRetentionDays')]",
     "azureFilesBackupDaysOfTheWeek": "[parameters('azureFilesBackupWeeklyDaysOfWeek')]",
-    "azureFilesBackupWeeklyRetentionDurationCount": "[parameters('azureFilesBackupWeeklyRetentionWeeks')]"
+    "azureFilesBackupWeeklyRetentionDurationCount": "[parameters('azureFilesBackupWeeklyRetentionWeeks')]",
+    "useAcsSmtp": "[and(parameters('smtpUseAuth'), equals(parameters('smtpAuthPreset'), 'acsSmtp'))]",
+    "acsEmailServiceName": "[toLower(format('{0}-email-{1}', parameters('appName'), substring(uniqueString(resourceGroup().id), 0, 6)))]",
+    "acsDomainNameEffective": "[if(empty(parameters('acsDomainName')), variables('domainRootDefault'), parameters('acsDomainName'))]",
+    "acsSenderUsername": "[toLower(split(parameters('smtpFrom'), '@')[0])]",
+    "acsSenderDisplayName": "[format('{0} Vaultwarden', parameters('appName'))]",
+    "acsCommunicationServiceName": "[toLower(format('{0}-acs-{1}', parameters('appName'), substring(uniqueString(resourceGroup().id), 0, 6)))]",
+    "acsSmtpCustomRoleGuid": "[guid(resourceGroup().id, 'AcsEmailSmtpSenderRole')]",
+    "acsSmtpCustomRoleId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('acsSmtpCustomRoleGuid'))]",
+    "namePrefix": "[toLower(format('{0}{1}', parameters('appName'), substring(uniqueString(resourceGroup().id),0,6)))]",
+    "deploymentScriptName": "[format('{0}-ensure-kv-secrets', parameters('appName'))]",
+    "deploymentScriptApiVersion": "2023-08-01"
   },
   "resources": [
     {
@@ -671,6 +739,117 @@
       ]
     },
     {
+      "type": "Microsoft.Authorization/roleDefinitions",
+      "apiVersion": "2022-04-01",
+      "name": "[variables('acsSmtpCustomRoleGuid')]",
+      "condition": "[variables('useAcsSmtp')]",
+      "properties": {
+        "roleName": "ACS Email SMTP Sender (Custom)",
+        "description": "Minimal permissions to manage ACS Email SMTP username credentials as per Microsoft docs.",
+        "type": "CustomRole",
+        "permissions": [
+          {
+            "actions": [
+              "Microsoft.Communication/CommunicationServices/Read",
+              "Microsoft.Communication/CommunicationServices/Write",
+              "Microsoft.Communication/EmailServices/write"
+            ],
+            "notActions": [],
+            "dataActions": [],
+            "notDataActions": []
+          }
+        ],
+        "assignableScopes": [
+          "[resourceGroup().id]"
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Communication/emailServices",
+      "apiVersion": "2025-09-01",
+      "name": "[variables('acsEmailServiceName')]",
+      "location": "global",
+      "condition": "[variables('useAcsSmtp')]",
+      "properties": {
+        "dataLocation": "[parameters('acsDataLocation')]"
+      }
+    },
+    {
+      "type": "Microsoft.Communication/emailServices/domains",
+      "apiVersion": "2025-09-01",
+      "name": "[format('{0}/{1}', variables('acsEmailServiceName'), variables('acsDomainNameEffective'))]",
+      "location": "global",
+      "condition": "[variables('useAcsSmtp')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Communication/emailServices', variables('acsEmailServiceName'))]"
+      ],
+      "properties": {
+        "domainManagement": "[parameters('acsDomainManagement')]",
+        "userEngagementTracking": "Disabled"
+      }
+    },
+    {
+      "type": "Microsoft.Communication/emailServices/domains/senderUsernames",
+      "apiVersion": "2025-09-01",
+      "name": "[format('{0}/{1}/{2}', variables('acsEmailServiceName'), variables('acsDomainNameEffective'), variables('acsSenderUsername'))]",
+      "condition": "[variables('useAcsSmtp')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Communication/emailServices/domains', variables('acsEmailServiceName'), variables('acsDomainNameEffective'))]"
+      ],
+      "properties": {
+        "displayName": "[variables('acsSenderDisplayName')]",
+        "username": "[variables('acsSenderUsername')]"
+      }
+    },
+    {
+      "type": "Microsoft.Communication/communicationServices",
+      "apiVersion": "2025-09-01",
+      "name": "[variables('acsCommunicationServiceName')]",
+      "location": "global",
+      "condition": "[variables('useAcsSmtp')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Communication/emailServices/domains', variables('acsEmailServiceName'), variables('acsDomainNameEffective'))]"
+      ],
+      "properties": {
+        "dataLocation": "[parameters('acsDataLocation')]",
+        "linkedDomains": [
+          "[resourceId('Microsoft.Communication/emailServices/domains', variables('acsEmailServiceName'), variables('acsDomainNameEffective'))]"
+        ],
+        "disableLocalAuth": false,
+        "publicNetworkAccess": "Enabled"
+      }
+    },
+    {
+      "type": "Microsoft.Communication/communicationServices/smtpUsernames",
+      "apiVersion": "2025-09-01",
+      "name": "[format('{0}/{1}', variables('acsCommunicationServiceName'), variables('acsSenderUsername'))]",
+      "condition": "[variables('useAcsSmtp')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Communication/communicationServices', variables('acsCommunicationServiceName'))]"
+      ],
+      "properties": {
+        "entraApplicationId": "[parameters('acsEntraApplicationId')]",
+        "entraTenantId": "[parameters('acsEntraTenantId')]",
+        "username": "[parameters('smtpUsername')]"
+      }
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "name": "[guid(resourceId('Microsoft.Communication/communicationServices', variables('acsCommunicationServiceName')), parameters('acsEntraServicePrincipalObjectId'), variables('acsSmtpCustomRoleGuid'))]",
+      "condition": "[and(variables('useAcsSmtp'), not(empty(parameters('acsEntraServicePrincipalObjectId'))))]",
+      "scope": "[format('Microsoft.Communication/communicationServices/{0}', variables('acsCommunicationServiceName'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Authorization/roleDefinitions', variables('acsSmtpCustomRoleGuid'))]",
+        "[resourceId('Microsoft.Communication/communicationServices', variables('acsCommunicationServiceName'))]"
+      ],
+      "properties": {
+        "roleDefinitionId": "[variables('acsSmtpCustomRoleId')]",
+        "principalId": "[parameters('acsEntraServicePrincipalObjectId')]",
+        "principalType": "ServicePrincipal"
+      }
+    },
+    {
       "type": "Microsoft.App/managedEnvironments",
       "apiVersion": "2024-03-01",
       "name": "[variables('containerEnvName')]",
@@ -861,6 +1040,26 @@
     "keyVaultName": {
       "type": "string",
       "value": "[variables('keyVaultName')]"
+    },
+    "acsEnabled": {
+      "type": "bool",
+      "value": "[variables('useAcsSmtp')]"
+    },
+    "acsCommunicationServiceName": {
+      "type": "string",
+      "value": "[if(variables('useAcsSmtp'), variables('acsCommunicationServiceName'), '')]"
+    },
+    "acsEmailServiceName": {
+      "type": "string",
+      "value": "[if(variables('useAcsSmtp'), variables('acsEmailServiceName'), '')]"
+    },
+    "acsEmailDomain": {
+      "type": "string",
+      "value": "[if(variables('useAcsSmtp'), variables('acsDomainNameEffective'), '')]"
+    },
+    "smtpServerResolved": {
+      "type": "string",
+      "value": "[if(variables('useAcsSmtp'), 'smtp.azurecomm.net:587', if(parameters('smtpUseAuth'), concat(if(empty(parameters('smtpHost')), 'smtp.office365.com', parameters('smtpHost')), ':', string(parameters('smtpPort'))), concat(reference(resourceId('Microsoft.Resources/deploymentScripts', variables('deploymentScriptName')), variables('deploymentScriptApiVersion')).outputs.smtp_host, ':25')))]"
     }
   }
 }

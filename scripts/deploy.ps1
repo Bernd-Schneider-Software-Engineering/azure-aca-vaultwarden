@@ -41,6 +41,18 @@ param(
   [ValidateSet("starttls","force_tls","off")]
   [string]$SmtpSecurity,
 
+  [ValidateSet("custom", "acsSmtp")]
+  [string]$SmtpAuthPreset = "custom",
+
+  # ACS SMTP (nur bei $SmtpUseAuth = $true und $SmtpAuthPreset = "acsSmtp")
+  [string]$AcsDataLocation = "Germany",
+  [string]$AcsDomainName = "",
+  [ValidateSet("CustomerManaged", "CustomerManagedInExchangeOnline")]
+  [string]$AcsDomainManagement = "CustomerManaged",
+  [string]$AcsEntraApplicationId = "",
+  [string]$AcsEntraTenantId = "",
+  [string]$AcsEntraServicePrincipalObjectId = "",
+
   # SMTP Auth (nur bei $SmtpUseAuth = $true)
   [Parameter(Mandatory=$false)]
   [string]$SmtpUsername,
@@ -72,7 +84,20 @@ if ([string]::IsNullOrWhiteSpace($BsseRef)) {
 
 Write-Host "Deploying with tags: Environment=$Environment, bsse:ref=$BsseRef"
 Write-Host "SMTP mode: " -NoNewline
-if ($SmtpUseAuth) { Write-Host "AUTH" } else { Write-Host "DIRECT SEND (no-auth)" }
+if ($SmtpUseAuth) {
+  if ($SmtpAuthPreset -eq "acsSmtp") { Write-Host "AUTH (acsSmtp / smtp.azurecomm.net:587)" }
+  else { Write-Host "AUTH (custom)" }
+} else { Write-Host "DIRECT SEND (no-auth / Port 25)" }
+
+# ACS SMTP Zusatzparameter (nur wenn aktiviert)
+if ($SmtpUseAuth -and $SmtpAuthPreset -eq "acsSmtp") {
+  if (-not $AcsEntraApplicationId) { $AcsEntraApplicationId = Read-Host "Entra App (Client) ID (acsEntraApplicationId)" }
+  if (-not $AcsEntraServicePrincipalObjectId) { $AcsEntraServicePrincipalObjectId = Read-Host "Service Principal Object ID (acsEntraServicePrincipalObjectId) (Tipp: az ad sp show --id <APPID> --query id -o tsv)" }
+  if (-not $AcsEntraTenantId) { $AcsEntraTenantId = "" }
+  if (-not $AcsDomainName) { $AcsDomainName = "" }
+  if (-not $SmtpUsername) { $SmtpUsername = Read-Host "ACS SMTP Username (smtpUsername) (frei oder email@domain)" }
+  if (-not $SmtpPassword) { $SmtpPassword = Read-Host -AsSecureString "ACS Entra App Client Secret (smtpPassword)" }
+}
 
 if ([string]::IsNullOrWhiteSpace($DomainUrl)) {
   $DomainUrl = Read-Host "Domain URL (e.g. https://vault.example.com)"
@@ -130,6 +155,14 @@ try {
       smtpFromName      = @{ value = $SmtpFromName }
       heloName          = @{ value = $HeloName }
       smtpAuthMechanism = @{ value = $SmtpAuthMechanism }
+    smtpAuthPreset = @{ value = $SmtpAuthPreset }
+    acsDataLocation = @{ value = $AcsDataLocation }
+    acsDomainName = @{ value = $AcsDomainName }
+    acsDomainManagement = @{ value = $AcsDomainManagement }
+    acsEntraApplicationId = @{ value = $AcsEntraApplicationId }
+    acsEntraTenantId = @{ value = $AcsEntraTenantId }
+    acsEntraServicePrincipalObjectId = @{ value = $AcsEntraServicePrincipalObjectId }
+
       smtpFrom          = @{ value = $SmtpFrom }
       smtpHost          = @{ value = $SmtpHost }
       smtpPort          = @{ value = $SmtpPort }

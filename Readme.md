@@ -1,4 +1,4 @@
-# Creates a Vaultwarden Container App with Azure File & PostgreSQL Storage
+# Vaultwarden auf Azure Container Apps (ACA) – mit Azure Files + PostgreSQL
 
 [![Deploy to Azure (ARM JSON)](
 https://raw.githubusercontent.com/Azure/azure-quickstart-templates/master/1-CONTRIBUTION-GUIDE/images/deploytoazure.svg?sanitize=true
@@ -6,264 +6,164 @@ https://raw.githubusercontent.com/Azure/azure-quickstart-templates/master/1-CONT
 https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FBernd-Schneider-Software-Engineering%2Fazure-aca-vaultwarden%2Fmaster%2Fmain.json
 )
 
-
-[![Visualize](https://raw.githubusercontent.com/Azure/azure-quickstart-templates/master/1-CONTRIBUTION-GUIDE/images/visualizebutton.svg?sanitize=true)](
-http://armviz.io/#/?load=https%3A%2F%2Fraw.githubusercontent.com%2FVertax1337%2Fvaultwarden-azure%2Fmaster%2Fmain.json
-)
-
 ---
+
 ## Endkunden-Dokumentation
 - [Vaultwarden – How to Use (BSSE)](./docs/HowToUse/HowToUse.pdf)
-- [Vaultwarden – How to Use (BSSE) PDF-VERSION ](./docs/HowToUse/HowToUse.pdf)
-
-## Overview
-
-This template deploys **Vaultwarden** as an **Azure Container App (Consumption)** with:
-
-- Persistent **Azure File Share** storage (`/data`)
-- **PostgreSQL Flexible Server** backend
-- Built-in **SMTP support** (Microsoft 365 compatible)
-- Designed for **KMU / small enterprise production usage**
-- Cost-efficient (no App Service Plan, no Front Door / WAF required)
-
-The deployment supports **backup & restore** scenarios and **safe container updates** without data loss.
-
----
-## Azure Files Backup (IaC)
-
-Dieses Template kann **Azure Backup für Azure Files** für das Vaultwarden-`/data`-Share automatisch aktivieren.
-Dabei werden erstellt:
-
-- **Recovery Services Vault**
-- **Backup Policy** (AzureFileShare)
-- **Protection Container** + **Protected Item** für das File Share
-
-**Parameter (Defaults):**
-- `azureFilesBackupEnabled`: `true`
-- `azureFilesBackupScheduleRunTime`: `05:30` (HH:MM, Minuten 00 oder 30)
-- `azureFilesBackupTimeZone`: `UTC`
-- `azureFilesBackupDailyRetentionDays`: `30`
-- `azureFilesBackupWeeklyDaysOfWeek`: `Sunday, Tuesday, Thursday`
-- `azureFilesBackupWeeklyRetentionWeeks`: `12`
-
-Doku-Referenz: [Microsoft Learn Quickstart – Configure vaulted backup for Azure Files using ARM](https://learn.microsoft.com/en-us/azure/backup/quick-backup-azure-files-vault-tier-arm).
 
 ---
 
+## Was dieses Template deployt
 
-## SMTP Modus: Direct Send (Default) vs. SMTP Auth
+Dieses ARM-Template (`main.json`) deployt **Vaultwarden** als **Azure Container App (Consumption)** inkl. persistenter Datenhaltung und „Production-Grundausstattung“.
 
-Das Template unterstützt zwei Betriebsarten:
+### Kern-Ressourcen (immer)
+- **Azure Container Apps Environment** (mit Log Analytics)
+- **Azure Container App** (Vaultwarden Container, Ingress extern, HTTPS-only per Default)
+- **Azure Storage Account + Azure Files Share** (Mount nach `/data`)
+- **Azure Database for PostgreSQL – Flexible Server** + **Datenbank**
+- **User Assigned Managed Identity**
+- **Azure Key Vault (RBAC)** für Secrets
+- **Deployment Script** (Bootstrap):
+  - erzeugt `ADMIN_TOKEN` und schreibt es in Key Vault
+  - erzeugt DB-App-User (Least-Privilege) und schreibt `DATABASE_URL` in Key Vault
+  - legt SMTP-Passwort als Secret ab (nur wenn SMTP Auth aktiv ist)
+  - ermittelt bei *Direct Send* den SMTP Host per **MX-Lookup** (Output)
 
-### A) Direct Send (Default, **nur intern** im Microsoft 365 Tenant)
+### Optional (per Parameter)
+- **Azure Backup für Azure Files** (`azureFilesBackupEnabled=true`, Default: **true**)  
+  Erstellt Recovery Services Vault + Backup Policy + Protection des File Shares.
+- **Azure Communication Services Email (ACS SMTP)** (`smtpUseAuth=true` + `smtpAuthPreset=acsSmtp`)  
+  Erstellt Email Service + Domain + Sender Username + Communication Service + SMTP Username + RBAC.
 
-- **Default:** `smtpUseAuth = false`
-- Es werden **keine** Env-Variablen/Secrets für `SMTP_USERNAME`, `SMTP_PASSWORD` oder `SMTP_AUTH_MECHANISM` angelegt.
-- `SMTP_HOST` wird **automatisch** via **MX-Lookup** ermittelt – basierend auf der Domain aus `domainUrl`.
-- `SMTP_FROM` wird automatisch auf `vault@kundendomain.tld` gesetzt (ebenfalls aus `domainUrl` abgeleitet).
+---
 
-**Wichtig (Ableitung der Domain):**  
-Aus `domainUrl` wird der Hostname extrahiert (z. B. `vault.kunde.tld`) und als **Base-Domain** standardmäßig die letzten **2 Labels** verwendet (→ `kunde.tld`).  
-Falls du exotische Public-Suffixes hast (z. B. `co.uk`) oder bewusst eine andere Mail-Domain brauchst, setze **manuell**:
-- `smtpHost` (Override des SMTP Hosts, statt MX-Lookup)
-- `smtpFrom` (Override der Absenderadresse)
+## SMTP: Betriebsarten
 
-**Hinweis:** Direct Send ist für **interne Empfänger** gedacht (User/Postfächer/Shared Mailboxes im gleichen Tenant).
-Wenn du an **externe** Empfänger senden willst oder SMTP Auth erzwingen musst, nutze Modus B.
+> Hinweis: Für SPF/DKIM/DMARC ist bei „direkt per SMTP aus der App senden“ die **Outbound/Egress-IP** relevant. Ohne statische Egress-IP ist *Direct Send* aus Azure heraus oft unzuverlässig.
 
-### B) SMTP Auth (optional, auch für extern)
+### A) Direct Send (Default, nur intern im Microsoft 365 Tenant)
+- Default: `smtpUseAuth = false`
+- `SMTP_HOST` wird automatisch via **MX-Lookup** ermittelt (aus `domainUrl` → Base-Domain)
+- `SMTP_FROM` wird automatisch gesetzt: `vault@<kundendomain.tld>` (override per Parameter möglich)
+- Keine Secrets für `SMTP_USERNAME` / `SMTP_PASSWORD`
+
+> Für externe Empfänger / saubere Zustellbarkeit: nutze SMTP Auth oder ACS SMTP.
+
+### B) SMTP Auth (klassisch, z. B. M365 / eigener SMTP)
+- `smtpUseAuth = true`
+- Default Host (wenn `smtpHost` leer): `smtp.office365.com`
+- Default Port: `587`
+- Default Security: `starttls`
+- `smtpUsername` + `smtpPassword` erforderlich
+
+### C) ACS SMTP (Azure Communication Services Email) ✅ empfohlen
+Wenn Direct Send (Port 25/MX) wegen dynamischer Outbound-IP problematisch ist oder du weg von Exchange SMTP Auth willst:
 
 - `smtpUseAuth = true`
-- `SMTP_HOST`: Default `smtp.office365.com` (kann über `smtpHost` überschrieben werden)
-- `smtpPort`: Default `587`
-- `smtpUsername` + `smtpPassword` sind Pflicht
-- Optional: `smtpAuthMechanism`, `smtpFromName`, `heloName`
+- `smtpAuthPreset = acsSmtp`
+- Vaultwarden wird gesetzt auf:
+  - `SMTP_HOST = smtp.azurecomm.net`
+  - `SMTP_PORT = 587`
+  - `SMTP_SECURITY = starttls`
 
----
+**Zusätzliche Parameter:**
+- `smtpUsername` = ACS SMTP Username
+- `smtpPassword` = **Client Secret** deiner Entra App Registration
+- `acsEntraApplicationId` = App (Client) ID
+- `acsEntraServicePrincipalObjectId` = Object ID des Service Principals (für RBAC)
+- optional: `acsEntraTenantId`, `acsDomainName`, `acsDataLocation`, `acsDomainManagement`
 
-## Manueller Schritt (Direct Send): Absender-Adresse/Shared Mailbox
-
-Die Anlage eines (freigegebenen) Postfachs wird **nicht** automatisch im Deployment gemacht (bewusst: Tenant-Admin-Rechte, Governance, Trennung IaC/Identity).
-
-Empfehlung: Lege ein freigegebenes Postfach an, z. B. `vault@kundendomain.tld`, und nutze dieses als Absender.
-
-Beispiel (Exchange Online PowerShell):
-
-```powershell
-New-Mailbox -Shared -Name "Vaultwarden" -Alias "vault" -PrimarySmtpAddress "vault@kundendomain.tld"
-```
+**Wichtig (DNS / Domain-Verifikation):**  
+Das Template kann DNS bei deinem Provider nicht automatisch setzen. Nach dem Deployment müssen die im Portal angezeigten DNS-Records gesetzt und die Domain verifiziert werden – erst dann ist der Versand zuverlässig.
 
 ---
 
 ## Deployment
 
+### 1) Portal („Deploy to Azure“)
+- Öffne den Deploy-Button und fülle die Parameter aus.
 
-### 1. Click **Deploy to Azure**
-You can choose between:
-- **ARM JSON** (portal-friendly, classic)
-- **Bicep** (recommended for technical users & CI/CD)
-
-### Optional: Local deployment (PowerShell)
-If you prefer a scripted deployment (e.g., for repeatability), use:
-
+### 2) Skript-Deployment (PowerShell)
 ```powershell
-./scripts/deploy.ps1 -ResourceGroupName <RG-NAME> -Environment prod \
-  -DomainUrl https://vault.example.com \
-  -SmtpUseAuth:$false \
-```
-
-> Tip: `./deploy.ps1` exists as a small forwarder and simply calls `./scripts/deploy.ps1`.
-
-### 2. Fill in the parameters
-
-- **Resource Group**  
-  All resources will be created inside this group.
-
-- **Environment (Tag / Kostenübersicht)**  
-  Default: `prod` (allowed: `prod`, `test`, `dev`).  
-  Wird als Tag `Environment` auf die Ressourcen geschrieben, damit Azure Cost Management sauber filtern kann.
-
-- **BSSE Deploy Ref (Tag / Traceability)**  
-  Wird als Tag `bsse:ref` gesetzt, um nachzuvollziehen, welcher Stand deployed wurde.
-
-  **Automatisch (ohne manuelle Eingabe):**  
-  Wenn `bsseRef` **leer** bleibt, versucht das Template den Ref aus der **Template-URL** des Deployments zu ermitteln (z. B. `main` / `master` / `v1.2.3`), sofern du über einen GitHub/Raw-Link deployest (Deploy-to-Azure Button / Template-Link).  
-  Bei lokalen Deployments ohne Template-Link wird als Fallback `local` gesetzt.
-
-  **Präzise (empfohlen für echte Traceability):**  
-  Wenn du einen **Commit-SHA** oder einen **Release-Tag** in `bsseRef` übergibst, landet genau dieser Wert in `bsse:ref`.
-
-- **Storage Account Type**  
-  Default: `Standard_LRS`  
-  For higher resilience you may choose `Standard_GRS`, `ZRS`, etc.
-
-- **Admin API Token (`/admin`)**
-  - Wird beim Deployment automatisch erzeugt und im **Azure Key Vault** gespeichert
-  - Wird der Container App als Secret (Key Vault Reference) bereitgestellt
-
-- **Key Vault Name (Soft-Delete safe)**
-
-  The Key Vault name is auto-generated with a short random suffix to avoid name collisions with
-  Key Vaults that are still in the **soft-deleted** state.
-  The effective name is shown in the deployment output `keyVaultName`.
-
-- **CPU / Memory sizing**  
-  Recommended starting point:
-  - `0.25 CPU`
-  - `0.5 GiB RAM`
-
-  Valid combinations:
-
-  | CPU  | Memory |
-  |-----:|-------:|
-  | 0.25 | 0.5 Gi |
-  | 0.5  | 1.0 Gi |
-  | 0.75 | 1.5 Gi |
-  | 1.0  | 2.0 Gi |
-  | 1.25 | 2.5 Gi |
-  | 1.5  | 3.0 Gi |
-  | 1.75 | 3.5 Gi |
-  | 2.0  | 4.0 Gi |
-
- - **Database admin password**
-
-  The PostgreSQL **admin password is auto-generated** during deployment and **not stored** in Key Vault.
-  For day-to-day operations Vaultwarden uses a separate **least-privilege database user**.
-  If you ever need admin access, reset the admin password in Azure (Portal/CLI) and connect with the new value.
-
-- **TLS Hinweis (PostgreSQL / `DATABASE_URL`)**  
-  `DATABASE_URL` wird mit `sslmode=require` erzeugt (Transportverschlüsselung aktiv).  
-  Hinweis: `require` erzwingt TLS, prüft aber i. d. R. **nicht** strikt das Server-Zertifikat. Wenn ihr striktere Zertifikatsprüfung wollt (z. B. `verify-full`/CA), muss das Trust-Store/CA-Handling im Container mitgedacht werden.
-
----
-
-### 3. Deploy
-
-Click **Deploy**.
-
-> ⚠️ **Known Azure timing issue**  
-> In rare cases the Container App may fail on first deployment because the Azure File share is not yet linked.
->
-> **Fix:** Click **Redeploy** and reuse the same parameters.  
-> No data will be lost.
-
----
-
-## Post-Deployment Steps (Required for Production)
-
-1. **Configure Custom Domain**
-   - ⚠️ **IMPORTANT: THE CONTAINER APP MUST BE RUN TO OBTAIN A MANAGED CERTIFICATE !!!!!**
-   - Add the required CNAME / TXT records shown in the Azure Portal
-
-3. **Enable Managed Certificate**
-   - Azure issues the TLS certificate after DNS verification
-
-4. **Disable HTTP**
-   - Set parameter `allowInsecureHttp = false`
-   - Enforces HTTPS-only access
-     
-5. **Microsoft Edge Konfiguration: Enhanced Security Mode (Bypass-Liste)**
-
-     Um einen reibungslosen Zugriff auf interne Ressourcen zu gewährleisten und gleichzeitig die Browsersicherheit zu maximieren, wurde im Microsoft Intune Admin Center eine spezifische Richtlinie für Windows-Geräte konfiguriert. 
-
-     Konfigurationsdetails:
-     Richtlinien-Name: W10 - Browser - HardeningException
-     Plattform: Windows
-     Zuweisung: Alle Firmengeräte (Eingeschlossene Gruppen: All devices, All users)
-
-     Wichtige Einstellung:
-     In den Configuration settings unter der Kategorie Microsoft Edge sind folgende Optionenen zu aktivieren:
-
-     Einstellung:
-     Configure the list of domains for which enhance security mode will not be enforced
-     (Konfiguriere die Liste der Domänen, für die der erweiterte Sicherheitsmodus nicht erzwungen wird).
-     **Status: Aktiviert (Enabled)**
-   
-     Ausgenommene Domäne:
-     **vault.firma.tld**
-   
-     Hinweis: Diese Einstellung MUSS gesetzt sein, da der Browser ansonsten im Sicherheitsmodus die Registrierung auf den Vault blockieren und dessen Funktionen eingeschränkt sind.
----
-
-## Updating Vaultwarden
-
-By default the deployment pins a specific Vaultwarden image version (see the `vaultwardenImage` parameter).
-To update Vaultwarden, create a new revision and set the image tag to the desired version.
-
-1. Azure Portal → Resource Group → **vaultwarden**
-2. **Revisions**
-3. **Create revision**
-4. Set the image tag to the desired Vaultwarden version (e.g. `vaultwarden/server:1.35.2-alpine`)
-5. Create revision
-
-✔ No downtime  
-✔ Persistent data remains intact  
-✔ Database migrations are handled automatically
-
-> Tip: Keep the template parameter `vaultwardenImage` aligned with your preferred version for fresh deployments.
-
----
-
-## Get Admin Token
-
-1. Azure Portal → Resource Group → **vaultwarden**
-2. Container App → **Configuration**
-3. Environment Variables
-4. Copy the value of `ADMIN_TOKEN`
-
-Admin UI:
-```
-https://<your-domain>/admin
+./scripts/deploy.ps1 -ResourceGroupName <RG-NAME> -Environment prod `
+  -DomainUrl https://vault.example.com `
+  -SmtpUseAuth:$false
 ```
 
 ---
 
-## Notes
+## Parameter (wichtigste)
 
-- SMTP is **mandatory** for:
-  - Password reset
-  - Signup verification
-  - Security notifications
-- Microsoft 365 SMTP (`smtp.office365.com`) is fully supported
-- Secrets are stored as **Container App Secrets**
-- Azure Container Apps (Consumption) keeps costs low while remaining production-ready
+- **appName**: Name der Container App (Default: `vault`)
+- **domainUrl**: Public URL (z. B. `https://vault.kunde.tld`)
+- **allowInsecureHttp**: Default `false` (HTTPS-only)
+- **cpuCores / memorySize**: Default `0.25` / `0.5`
+- **vaultwardenImage**: Default `vaultwarden/server:1.35.2-alpine`
+
+### Backup Parameter (Azure Files)
+- `azureFilesBackupEnabled`: Default **true**
+- `azureFilesBackupScheduleRunTime`: Default `05:30` (UTC)
+- `azureFilesBackupDailyRetentionDays`: Default `30`
+- `azureFilesBackupWeeklyDaysOfWeek`: Default `Sunday, Tuesday, Thursday`
+- `azureFilesBackupWeeklyRetentionWeeks`: Default `12`
+
+### PostgreSQL Backup / PITR
+- Der Flexible Server ist mit `backupRetentionDays = 7` konfiguriert (Point-in-time Restore Fenster: 7 Tage).
+
+---
+
+## Was der Kunde bekommt (Deliverables)
+
+### Betrieb / Service
+- **Lauffähiges Vaultwarden** über eine öffentliche URL (Ingress extern, HTTPS-only)
+- **Persistente Datenhaltung**
+  - `/data` liegt auf Azure Files (Share)
+  - Vaultwarden nutzt PostgreSQL (kein SQLite)
+- **Secrets & Bootstrap**
+  - `ADMIN_TOKEN` in Key Vault
+  - `DATABASE_URL` in Key Vault (Least-Privilege DB User)
+  - optional SMTP Secret in Key Vault (bei SMTP Auth/ACS)
+
+### Monitoring
+- Logs über **Log Analytics** (Container Apps Logging)
+
+### Backup
+- **PostgreSQL**: automatische Backups + PITR (7 Tage Fenster)
+- **Azure Files**: Azure Backup aktiviert (wenn `azureFilesBackupEnabled=true`, Default: true)
+
+---
+
+## Wiederherstellung (High-Level)
+
+> Im Repo ist aktuell kein voll ausformuliertes „Runbook“ (Portal/CLI Schrittfolge) enthalten – hier ist die korrekte High-Level-Logik, die sich aus den deployten Ressourcen ergibt.
+
+### Restore 1: Container App / Revision kaputt
+- Neue Revision deployen / erneut ausrollen  
+  ✅ Daten bleiben erhalten (DB + Files sind extern)
+
+### Restore 2: Datenverlust im Azure Files Share (`/data`)
+- Restore über **Recovery Services Vault → Azure Files Restore** (wenn Azure Files Backup aktiv ist)
+
+### Restore 3: Datenbankproblem (PostgreSQL)
+- **Point-in-time Restore** des PostgreSQL Flexible Servers innerhalb des 7-Tage Fensters
+- Danach `DATABASE_URL` (Key Vault Secret) auf den neuen Server/DNS umstellen
+
+### Restore 4: Secrets in Key Vault gelöscht
+- Key Vault hat Soft-Delete/Purge-Protection (Wiederherstellung über Portal/CLI möglich)
+- Danach Container App ggf. neu starten / neue Revision
+
+---
+
+## Post-Deployment (Produktion)
+
+1) **Custom Domain** im Container App Environment / Container App konfigurieren (CNAME/TXT gemäß Portal)
+2) **Managed Certificate** aktivieren (nach DNS-Verifikation)
+3) Optional: HTTP temporär nur zu Troubleshooting aktivieren (`allowInsecureHttp=true`) – empfohlen ist `false`
+
+---
+
+## Hinweis zur Repo-Struktur
+- **`main.json`** ist die *einzige* maßgebliche Deploy-Datei.
+- Es gibt keine separate „patched“ Template-Datei – Versionierung erfolgt über Git.
+
