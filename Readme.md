@@ -134,26 +134,129 @@ Das Template kann DNS bei deinem Provider nicht automatisch setzen. Nach dem Dep
 
 ---
 
-## Wiederherstellung (High-Level)
+## Wiederherstellung / Disaster-Recovery (Runbook)
 
-> Im Repo ist aktuell kein voll ausformuliertes „Runbook“ (Portal/CLI Schrittfolge) enthalten – hier ist die korrekte High-Level-Logik, die sich aus den deployten Ressourcen ergibt.
+Dieses Repo deployt Persistenz **außerhalb** der Container App:
 
-### Restore 1: Container App / Revision kaputt
-- Neue Revision deployen / erneut ausrollen  
-  ✅ Daten bleiben erhalten (DB + Files sind extern)
+- **PostgreSQL Flexible Server** (Datenbank)
+- **Azure Files Share** (`/data`) (Attachments/Icons/Send/SQLite etc. – je nach Vaultwarden-Config)
+- **Key Vault** (Secrets; Soft-Delete/Purge-Protection)
 
-### Restore 2: Datenverlust im Azure Files Share (`/data`)
-- Restore über **Recovery Services Vault → Azure Files Restore** (wenn Azure Files Backup aktiv ist)
+> Grundprinzip: **Container App ist austauschbar**, Daten liegen extern. Restore bedeutet fast immer: **Daten wiederherstellen** und danach **Container App auf die wiederhergestellten Daten zeigen lassen** (neue Revision).
 
-### Restore 3: Datenbankproblem (PostgreSQL)
-- **Point-in-time Restore** des PostgreSQL Flexible Servers innerhalb des 7-Tage Fensters
-- Danach `DATABASE_URL` (Key Vault Secret) auf den neuen Server/DNS umstellen
+### 0) Vor jedem Restore (Checkliste)
 
-### Restore 4: Secrets in Key Vault gelöscht
-- Key Vault hat Soft-Delete/Purge-Protection (Wiederherstellung über Portal/CLI möglich)
-- Danach Container App ggf. neu starten / neue Revision
+1. **Incident vs. Drill**: willst du _Original Location_ überschreiben oder bewusst _Alternate Location_ (besser für Tests)?
+2. **Schreibzugriffe stoppen (wenn nötig)**: z. B. Container App temporär auf `minReplicas=0` / Wartungsfenster, damit während des Restores keine inkonsistenten Writes passieren.
+3. **Inventar notieren** (für Nachvollziehbarkeit):
+   - Resource Group
+   - Container App Name + aktuelle Revision
+   - PostgreSQL Servername
+   - Storage Account + File Share Name
+   - Recovery Services Vault Name
+   - Key Vault Name
 
 ---
+
+### 1) Container App / Revision kaputt (kein Datenverlust)
+
+**Ziel:** App wieder online bringen, ohne Daten-Restore.
+
+- Neue Revision deployen (erneutes ARM-Deployment) oder letzte funktionierende Revision wieder hochziehen.
+- Erwartung: DB + Files bleiben erhalten (extern).
+
+---
+
+### 2) Azure Files Restore (`/data`)
+
+> Voraussetzung: `azureFilesBackupEnabled=true` (im Template default: `true`). Dann existiert ein **Recovery Services Vault** + Protection für den File Share.
+
+#### 2.1 Backup-Item & Recovery Points finden (CLI)
+
+```bash
+RG="<resource-group>"
+VAULT="$(az resource list -g "$RG" --resource-type Microsoft.RecoveryServices/vaults --query "[0].name" -o tsv)"
+
+# Container + Item ermitteln
+CONTAINER="$(az backup container list -g "$RG" --vault-name "$VAULT" --backup-management-type AzureStorage --query "[0].name" -o tsv)"
+ITEM="$(az backup item list -g "$RG" --vault-name "$VAULT" --workload-type AzureFileShare --query "[0].name" -o tsv)"
+
+# Recovery Points anzeigen
+az backup recoverypoint list -g "$RG" --vault-name "$VAULT" --container-name "$CONTAINER" --item-name "$ITEM" -o table
+```
+
+#### 2.2 Restore ausführen (empfohlen: **Alternate Location** für Drill)
+
+```bash
+# Beispiel: Restore kompletten Share in ein *anderes* File Share / Folder (Drill)
+TARGET_SA="<target-storage-account>"
+TARGET_SHARE="<target-file-share>"
+TARGET_FOLDER="restore-$(date +%Y%m%d-%H%M)"
+RP="<recovery-point-id>"
+
+az backup restore restore-azurefileshare   -g "$RG" --vault-name "$VAULT"   --rp-name "$RP"   --container-name "$CONTAINER"   --item-name "$ITEM"   --restore-mode alternatelocation   --target-storage-account "$TARGET_SA"   --target-file-share "$TARGET_SHARE"   --target-folder "$TARGET_FOLDER"   --resolve-conflict overwrite   -o table
+```
+
+**Original Location Restore** (overschreibt den bestehenden Share) ist möglich, ist aber für Tests riskant. Wenn du wirklich „zurückdrehen“ willst, nutze `--restore-mode originallocation`.
+
+#### 2.3 Vaultwarden wieder anbinden
+
+- **Original Location Restore**: i. d. R. keine App-Änderung nötig → neue Revision ausrollen / App neu starten.
+- **Alternate Location Restore**: du musst Vaultwarden auf den restored Share zeigen lassen (Volume/Share ändern) → neue Revision mit angepasstem Volume-Mount.
+
+---
+
+### 3) PostgreSQL Restore (PITR)
+
+> Flexible Server PITR erstellt **einen neuen Server**. Danach muss `DATABASE_URL` (Key Vault Secret) auf den neuen FQDN zeigen.
+
+#### 3.1 PITR durchführen (CLI)
+
+```bash
+RG="<resource-group>"
+SRC_PG="<source-flexible-server-name>"
+NEW_PG="<restored-flexible-server-name>"
+RESTORE_TIME_UTC="2026-02-17T20:15:00Z"   # innerhalb der Backup-Retention
+LOCATION="<azure-region>"
+
+az postgres flexible-server restore   -g "$RG"   --name "$NEW_PG"   --source-server "$SRC_PG"   --restore-time "$RESTORE_TIME_UTC"   --location "$LOCATION"
+```
+
+#### 3.2 `DATABASE_URL` auf neuen Server umstellen
+
+Dieses Repo nutzt:
+- Container App Secret: `database-url`
+- Key Vault Secret: `vw-database-url`
+
+Vorgehen (Beispiel, Wert als Platzhalter):
+
+```bash
+KV="<key-vault-name>"
+DB_URL="<postgres-connection-string>"
+
+az keyvault secret set --vault-name "$KV" --name "vw-database-url" --value "$DB_URL"
+```
+
+Danach Container App neu ausrollen (neue Revision / Restart), damit die App den aktualisierten Secret-Value zieht.
+
+---
+
+### 4) Key Vault Secrets gelöscht
+
+- Key Vault ist mit **Soft-Delete/Purge-Protection** deployt → Wiederherstellung über Portal/CLI möglich.
+- Nach Restore ggf. neue Revision ausrollen.
+
+---
+
+### 5) 1x Restore-Probe (empfohlen – „Drill“)
+
+**Ziel:** Einmal nach Go-Live nachweisen, dass Restore in der Praxis klappt.
+
+1. **Azure Files**: Recovery Point auswählen → Restore in **Alternate Location** (neuer File Share oder Unterordner).
+2. **Postgres**: PITR in **neuen** Flexible Server.
+3. **Test-Revision**: Vaultwarden als neue Revision starten, die auf die restored Ressourcen zeigt.
+4. **Smoke**: Login + Vault lesen + ein Attachment anlegen.
+5. **Cleanup**: Test-Revision + restored Test-Ressourcen löschen (wenn nicht mehr benötigt).
 
 ## Zwingend manuelle Schritte (Production)
 
@@ -230,4 +333,5 @@ Optional (Governance):
 ## Hinweis zur Repo-Struktur
 - **`main.json`** ist die *einzige* maßgebliche Deploy-Datei.
 - Es gibt keine separate „patched“ Template-Datei – Versionierung erfolgt über Git.
+
 
