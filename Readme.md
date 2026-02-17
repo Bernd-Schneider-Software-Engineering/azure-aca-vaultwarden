@@ -155,11 +155,75 @@ Das Template kann DNS bei deinem Provider nicht automatisch setzen. Nach dem Dep
 
 ---
 
-## Post-Deployment (Produktion)
+## Zwingend manuelle Schritte (Production)
 
-1) **Custom Domain** im Container App Environment / Container App konfigurieren (CNAME/TXT gemäß Portal)
-2) **Managed Certificate** aktivieren (nach DNS-Verifikation)
-3) Optional: HTTP temporär nur zu Troubleshooting aktivieren (`allowInsecureHttp=true`) – empfohlen ist `false`
+Auch wenn das Deployment vollständig per IaC läuft, gibt es ein paar Schritte, die **nicht** sauber automatisierbar sind (DNS-Zugriff, Zertifikate, externe Credentials/Keys) und deshalb **zwingend manuell** erledigt werden müssen.
+
+### 1) Custom Domain & Managed Certificate (Azure Container Apps)
+
+Wenn du **eine eigene Domain** nutzen willst (z. B. `vault.example.com`), musst du im Azure Portal oder per CLI:
+
+1. Custom Domain am **Container App** (Ingress) hinzufügen
+2. die geforderten **DNS Records** (CNAME/TXT) beim Domain-Provider setzen
+3. nach erfolgreicher Verifikation ein **Managed Certificate** ausstellen/zuweisen
+
+> Ohne Custom Domain kannst du auch die standardmäßige `*.azurecontainerapps.io`-URL nutzen (inkl. TLS), dann entfällt dieser Schritt.
+
+### 2) ACS Email Domain-Verifizierung (SPF/DKIM/DMARC)
+
+Wenn du **ACS Email** nutzt, ist DNS-Verifikation zwingend, damit SPF/DKIM/DMARC sauber funktionieren.
+
+- Im Email Service / Domain im Azure Portal die geforderten **DNS Records** setzen (SPF + DKIM + ggf. DMARC)
+- Warten, bis die Domain im Portal als **verified** erscheint
+- Erst dann produktiv Mails über `smtp.azurecomm.net` versenden (SMTP Auth)
+
+> Die IaC erstellt die Ressourcen, aber **DNS** bleibt immer manuell.
+
+### 3) SSO (OIDC) mit Entra ID (Vaultwarden)
+
+Vaultwarden unterstützt SSO via **OpenID Connect**. Dafür brauchst du eine App in Entra ID:
+
+**Entra ID / App vorbereiten**
+1. App Registrierung oder Enterprise App anlegen (OIDC)
+2. Redirect URI(s) setzen (Beispiele):
+   - `https://<DEIN_FQDN>/identity/connect/oidc-signin`
+   - `https://<DEIN_FQDN>/identity/connect/oidc-signout`
+3. Client Secret erzeugen (Wert kopieren)
+4. Scopes/Claims so konfigurieren, dass mindestens `email`/`preferred_username` verfügbar ist
+
+**IaC Parameter (SSO)**
+- `ssoEnabled` = `true`
+- `ssoAuthority` = z. B. `https://login.microsoftonline.com/<TENANT_ID>/v2.0`
+- `ssoClientId` = App (Client) ID
+- `ssoClientSecret` = Secret Value (wird als Key Vault Secret abgelegt)
+- Optional: `ssoOnly` = `true` (nur wenn du wirklich Passwort-Login komplett verbieten willst)
+- Optional: `ssoScopes` anpassen (Default: `openid profile email offline_access User.Read`)
+
+> Hinweis: Je nach Vaultwarden-Release bleibt ein Master-Passwort weiterhin relevant (SSO = Login-Flow für Web Vault).
+
+### 4) Push Notifications (Mobile Clients)
+
+Push Notifications laufen bei Vaultwarden in der Regel über die Bitwarden Push Relay Infrastruktur. Dafür brauchst du ein **Installation ID/Key Pair**:
+
+1. Auf `https://bitwarden.com/host/` die **Installation ID** und den **Installation Key** generieren
+2. In der Deployment-Konfiguration setzen:
+   - `pushEnabled` = `true`
+   - `pushInstallationId`
+   - `pushInstallationKey` (wird als Key Vault Secret abgelegt)
+   - Optional: `pushUseEuServers` = `true` (wenn du Bitwarden EU Endpoints nutzen willst)
+
+### 5) Bitwarden Directory Connector (User/Group Sync)
+
+Der Directory Connector ist ein **separates Tool** (läuft nicht „in Vaultwarden“). Für automatische Benutzer-/Gruppen-Synchronisation:
+
+1. In Vaultwarden eine **Organization** anlegen (Web Vault)
+2. In der Organization einen **API Key** erzeugen
+3. Bitwarden Directory Connector installieren/konfigurieren (z. B. auf einer VM/Worker)
+4. Connector auf deine Vaultwarden URL zeigen lassen und mit dem Org API Key verbinden
+5. Sync-Job planen (Scheduler)
+
+Optional (Governance):
+- `orgCreationUsers` setzen, um einzuschränken, wer Organizations erstellen darf.
 
 ---
 

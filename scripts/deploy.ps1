@@ -60,6 +60,43 @@ param(
   [Parameter(Mandatory=$false)]
   [securestring]$SmtpPassword,
 
+  # Optional: SSO (OIDC) für Web Vault Login (Vaultwarden >= 1.35)
+  [Parameter(Mandatory=$false)]
+  [bool]$SsoEnabled = $false,
+
+  [Parameter(Mandatory=$false)]
+  [bool]$SsoOnly = $false,
+
+  [Parameter(Mandatory=$false)]
+  [string]$SsoAuthority = "",
+
+  [Parameter(Mandatory=$false)]
+  [string]$SsoClientId = "",
+
+  [Parameter(Mandatory=$false)]
+  [securestring]$SsoClientSecret,
+
+  [Parameter(Mandatory=$false)]
+  [string]$SsoScopes = "openid profile email offline_access User.Read",
+
+  # Optional: Push Notifications (Mobile Clients) via Bitwarden Push Relay
+  [Parameter(Mandatory=$false)]
+  [bool]$PushEnabled = $false,
+
+  [Parameter(Mandatory=$false)]
+  [string]$PushInstallationId = "",
+
+  [Parameter(Mandatory=$false)]
+  [securestring]$PushInstallationKey,
+
+  [Parameter(Mandatory=$false)]
+  [bool]$PushUseEuServers = $false,
+
+  # Optional: Restrict who can create Organizations (Directory Connector / Governance)
+  [Parameter(Mandatory=$false)]
+  [string]$OrgCreationUsers = "",
+
+
   [ValidateSet("prod","test","dev")]
   [string]$Environment = "prod",
 
@@ -133,6 +170,33 @@ else {
   }
 }
 
+
+# --- Optional: SSO (OIDC) Eingaben ---
+if ($SsoEnabled) {
+  if ([string]::IsNullOrWhiteSpace($SsoAuthority)) {
+    $SsoAuthority = Read-Host "SSO Authority (OIDC) (z.B. https://login.microsoftonline.com/<TENANT_ID>/v2.0)"
+  }
+  if ([string]::IsNullOrWhiteSpace($SsoClientId)) {
+    $SsoClientId = Read-Host "SSO Client ID (Application (client) ID)"
+  }
+  if (-not $SsoClientSecret) {
+    $SsoClientSecret = Read-Host "SSO Client Secret" -AsSecureString
+  }
+  if ([string]::IsNullOrWhiteSpace($SsoScopes)) {
+    $SsoScopes = "openid profile email offline_access User.Read"
+  }
+}
+
+# --- Optional: Push Notifications Eingaben ---
+if ($PushEnabled) {
+  if ([string]::IsNullOrWhiteSpace($PushInstallationId)) {
+    $PushInstallationId = Read-Host "Push Installation ID (von https://bitwarden.com/host/)"
+  }
+  if (-not $PushInstallationKey) {
+    $PushInstallationKey = Read-Host "Push Installation Key (von https://bitwarden.com/host/)" -AsSecureString
+  }
+}
+
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $TemplatePath = Join-Path $RepoRoot "main.json"
 
@@ -155,6 +219,15 @@ try {
       smtpFromName      = @{ value = $SmtpFromName }
       heloName          = @{ value = $HeloName }
       smtpAuthMechanism = @{ value = $SmtpAuthMechanism }
+      ssoEnabled       = @{ value = $SsoEnabled }
+      ssoOnly          = @{ value = $SsoOnly }
+      ssoAuthority     = @{ value = $SsoAuthority }
+      ssoClientId      = @{ value = $SsoClientId }
+      ssoScopes        = @{ value = $SsoScopes }
+      pushEnabled      = @{ value = $PushEnabled }
+      pushInstallationId = @{ value = $PushInstallationId }
+      pushUseEuServers = @{ value = $PushUseEuServers }
+      orgCreationUsers = @{ value = $OrgCreationUsers }
     smtpAuthPreset = @{ value = $SmtpAuthPreset }
     acsDataLocation = @{ value = $AcsDataLocation }
     acsDomainName = @{ value = $AcsDomainName }
@@ -181,6 +254,27 @@ try {
       [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
     }
     $params.parameters.smtpPassword = @{ value = $smtpPasswordPlain }
+
+  if ($SsoEnabled -and $SsoClientSecret) {
+    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($SsoClientSecret)
+    try {
+      $ssoClientSecretPlain = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+    } finally {
+      [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    }
+    $params.parameters.ssoClientSecret = @{ value = $ssoClientSecretPlain }
+  }
+
+  if ($PushEnabled -and $PushInstallationKey) {
+    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($PushInstallationKey)
+    try {
+      $pushInstallationKeyPlain = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+    } finally {
+      [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    }
+    $params.parameters.pushInstallationKey = @{ value = $pushInstallationKeyPlain }
+  }
+
   }
 
   $params | ConvertTo-Json -Depth 15 | Set-Content -Path $paramFile -Encoding UTF8
@@ -195,4 +289,6 @@ finally {
     Remove-Item $paramFile -Force -ErrorAction SilentlyContinue
   }
   $smtpPasswordPlain = $null
+  $ssoClientSecretPlain = $null
+  $pushInstallationKeyPlain = $null
 }
