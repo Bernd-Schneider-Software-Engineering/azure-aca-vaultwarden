@@ -286,13 +286,24 @@ Wenn du **ACS Email** nutzt, ist DNS-Verifikation zwingend, damit SPF/DKIM/DMARC
 
 Vaultwarden unterstützt SSO via **OpenID Connect**. Dafür brauchst du eine App in Entra ID:
 
-**Entra ID / App vorbereiten**
-1. App Registrierung oder Enterprise App anlegen (OIDC)
-2. Redirect URI(s) setzen (Beispiele):
-   - `https://<DEIN_FQDN>/identity/connect/oidc-signin`
-   - `https://<DEIN_FQDN>/identity/connect/oidc-signout`
-3. Client Secret erzeugen (Wert kopieren)
-4. Scopes/Claims so konfigurieren, dass mindestens `email`/`preferred_username` verfügbar ist
+**Microsoft Entra ID / App vorbereiten**
+1. Create an "App registration" in Entra ID following Identity | Applications | App registrations.
+   
+3. From the "Overview" of your "App registration", you'll need the "Directory (tenant) ID" for the SSO_AUTHORITY variable and the "Application (client) ID" as the SSO_CLIENT_ID value.
+   
+4. In "Certificates & Secrets" create an "App secret" , you'll need the "Secret Value" for the SSO_CLIENT_SECRET variable.
+   
+5. In "Authentication" add https://vaultwarden.example.tld/identity/connect/oidc-signin as "Web Redirect URI".
+   
+6. In "API Permissions" make sure you have profile, email and offline_access listed under "API / Permission name" (offline_access is required, otherwise no refresh_token is returned, see https://github.com/MicrosoftDocs/azure-docs/issues/17134).
+   Only the v2 endpoint is compliant with the OpenID spec, see https://github.com/MicrosoftDocs/azure-docs/issues/38427 and https://github.com/ramosbugs/openidconnect-rs/issues/122.
+
+Your configuration should look like this:
+
+SSO_AUTHORITY=https://login.microsoftonline.com/${Directory_ID}/v2.0 #tenant
+SSO_SCOPES=openid profile offline_access User.Read
+SSO_CLIENT_ID=${Application_ID} #client
+SSO_CLIENT_SECRET=${Secret_Value}
 
 **IaC Parameter (SSO)**
 - `ssoEnabled` = `true`
